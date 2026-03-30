@@ -8,6 +8,7 @@ ENV_TEMPLATE="$ROOT_DIR/.env.example"
 WAIT_TIMEOUT=300
 SKIP_UP=0
 SKIP_BOOTSTRAP=0
+SKIP_CONNECTIONS=0
 SKIP_WAIT=0
 PROFILES_OVERRIDE=""
 SET_OVERRIDES=()
@@ -26,6 +27,7 @@ Options:
   --wait-timeout <secs>   Health wait timeout in seconds (default: 300)
   --no-up                 Skip docker compose up -d
   --no-bootstrap          Skip ./update-config.sh
+  --no-connections        Skip automated app-to-app connection setup
   --no-wait               Skip waiting for container health
   --help                  Show this help
 
@@ -181,7 +183,7 @@ profile_enabled() {
 
 ensure_commands() {
   local command_name
-  for command_name in docker awk sed cp chmod mktemp id; do
+  for command_name in docker awk sed cp chmod mktemp id python3 curl; do
     command -v "$command_name" >/dev/null 2>&1 || die "Missing required command: $command_name"
   done
 
@@ -398,6 +400,10 @@ while (( $# > 0 )); do
       SKIP_BOOTSTRAP=1
       shift
       ;;
+    --no-connections)
+      SKIP_CONNECTIONS=1
+      shift
+      ;;
     --no-wait)
       SKIP_WAIT=1
       shift
@@ -430,6 +436,11 @@ fi
 if (( SKIP_BOOTSTRAP == 0 )); then
   log "Running first-run post-start configuration"
   (cd "$ROOT_DIR" && ./update-config.sh)
+fi
+
+if (( SKIP_CONNECTIONS == 0 )); then
+  log "Automating app-to-app connections"
+  (cd "$ROOT_DIR" && python3 ./configure-app-connections.py)
 fi
 
 if (( SKIP_WAIT == 0 )); then

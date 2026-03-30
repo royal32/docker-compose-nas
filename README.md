@@ -104,7 +104,7 @@ Run the automated bootstrap:
 ./setup-stack.sh
 ```
 
-This will create `.env` if needed, detect local `USER_ID`, `GROUP_ID`, and `TIMEZONE`, create missing per-service env files for enabled profiles, validate the compose configuration, start the stack, run `./update-config.sh`, and wait for health checks.
+This will create `.env` if needed, detect local `USER_ID`, `GROUP_ID`, and `TIMEZONE`, create missing per-service env files for enabled profiles, validate the compose configuration, start the stack, run `./update-config.sh`, automate the qBittorrent, Sonarr, Radarr, Lidarr, and Prowlarr connections when those services are enabled, and wait for health checks.
 
 For a local `localhost` setup, leave `TRAEFIK_CERT_RESOLVER` empty to use Traefik's default certificate.
 Set `TRAEFIK_CERT_RESOLVER=myresolver` only when you have configured ACME and the required DNS provider credentials.
@@ -145,6 +145,17 @@ If you want to show Jellyfin information in the homepage, create it in Jellyfin 
 | `ADGUARD_PASSWORD`             | Optional - AdGuard Home password to show details in the homepage, if enabled                                                                                                                           |                                                  |
 | `QBITTORRENT_USERNAME`         | qBittorrent username to access the web UI                                                                                                                                                              | `admin`                                          |
 | `QBITTORRENT_PASSWORD`         | qBittorrent password to access the web UI                                                                                                                                                              | `adminadmin`                                     |
+| `QBITTORRENT_SAVE_PATH`        | Default qBittorrent download path inside the container                                                                                                                                                  | `/data/torrents`                                 |
+| `QBITTORRENT_TEMP_PATH`        | qBittorrent temporary download path inside the container                                                                                                                                                | `/data/torrents/incomplete`                      |
+| `SONARR_ROOT_FOLDER`           | Sonarr root folder created and configured automatically                                                                                                                                                 | `/data/media/tv`                                 |
+| `RADARR_ROOT_FOLDER`           | Radarr root folder created and configured automatically                                                                                                                                                | `/data/media/movies`                             |
+| `LIDARR_ROOT_FOLDER`           | Lidarr root folder created and configured automatically                                                                                                                                                | `/data/media/music`                              |
+| `SONARR_DOWNLOAD_PATH`         | qBittorrent save path used for Sonarr-managed downloads                                                                                                                                                | `/data/torrents/tv`                              |
+| `RADARR_DOWNLOAD_PATH`         | qBittorrent save path used for Radarr-managed downloads                                                                                                                                                | `/data/torrents/movies`                          |
+| `LIDARR_DOWNLOAD_PATH`         | qBittorrent save path used for Lidarr-managed downloads                                                                                                                                                | `/data/torrents/music`                           |
+| `SONARR_QBIT_CATEGORY`         | qBittorrent category configured for Sonarr                                                                                                                                                              | `tv-sonarr`                                      |
+| `RADARR_QBIT_CATEGORY`         | qBittorrent category configured for Radarr                                                                                                                                                              | `radarr`                                         |
+| `LIDARR_QBIT_CATEGORY`         | qBittorrent category configured for Lidarr                                                                                                                                                              | `lidarr`                                         |
 | `DNS_CHALLENGE`                | Enable/Disable DNS01 challenge, set to `false` to disable.                                                                                                                                             | `true`                                           |
 | `DNS_CHALLENGE_PROVIDER`       | Provider for DNS01 challenge, [see list here](https://doc.traefik.io/traefik/https/acme/#providers).                                                                                                   | `cloudflare`                                     |
 | `LETS_ENCRYPT_CA_SERVER`       | Let's Encrypt CA Server used to generate certificates, set to production by default.<br/>Set to `https://acme-staging-v02.api.letsencrypt.org/directory` to test your changes with the staging server. | `https://acme-v02.api.letsencrypt.org/directory` |
@@ -219,15 +230,24 @@ In Lidarr, set the Root folder to `/data/media/music`.
 
 ### Download Client
 
-Then qBittorrent can be configured at Settings > Download Clients. Because all the networking for qBittorrent takes
-place in the VPN container, the hostname for qBittorrent is the hostname of the VPN container, ie `vpn`, and the port is `8080`:
+`./setup-stack.sh` now configures qBittorrent automatically for Sonarr and Radarr by default.
+It creates the root folders, creates qBittorrent categories, points the download client at `vpn:8080`, and sets qBittorrent's internal save paths.
+
+If you want to run just the integration step again, use:
+
+```shell
+./configure-app-connections.py
+```
+
+Because all the networking for qBittorrent takes place in the VPN container, the hostname for qBittorrent is the hostname of the VPN container, ie `vpn`, and the port is `8080`.
 
 ## Prowlarr
 
 The indexers are configured through Prowlarr. They synchronize automatically to Radarr and Sonarr.
 
-Radarr and Sonarr may then be added via Settings > Apps. The Prowlarr server is `http://prowlarr:9696/prowlarr`, the Radarr server
-is `http://radarr:7878/radarr` Sonarr `http://sonarr:8989/sonarr`, and Lidarr `http://lidarr:8686/lidarr`.
+`./setup-stack.sh` now adds the Prowlarr application links for Sonarr, Radarr, and Lidarr automatically when those services are running.
+
+The Prowlarr server is `http://prowlarr:9696/prowlarr`, the Radarr server is `http://radarr:7878/radarr`, the Sonarr server is `http://sonarr:8989/sonarr`, and the Lidarr server is `http://lidarr:8686/lidarr`.
 
 Their API keys can be found in Settings > Security > API Key.
 
