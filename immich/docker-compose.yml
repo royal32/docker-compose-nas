@@ -20,7 +20,7 @@ services:
       - traefik.enable=true
       - traefik.http.routers.immich.rule=(Host(`${IMMICH_HOSTNAME}`))
       - traefik.http.routers.immich.tls=true
-      - traefik.http.routers.immich.tls.certresolver=myresolver
+      - traefik.http.routers.immich.tls.certresolver=${TRAEFIK_CERT_RESOLVER:-}
       - traefik.http.services.immich.loadbalancer.server.port=2283
       - homepage.group=Apps
       - homepage.name=Immich

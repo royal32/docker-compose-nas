@@ -49,7 +49,7 @@ services:
       - "traefik.http.services.adguardhome.loadbalancer.server.port=3000"
       - "traefik.http.routers.adguardhome.rule=(Host(`${ADGUARD_HOSTNAME}`))"
       - "traefik.http.routers.adguardhome.tls=true"
-      - "traefik.http.routers.adguardhome.tls.certresolver=myresolver"
+      - "traefik.http.routers.adguardhome.tls.certresolver=${TRAEFIK_CERT_RESOLVER:-}"
       - homepage.group=Utilities
       - homepage.name=Adguard
       - homepage.icon=adguard-home.png

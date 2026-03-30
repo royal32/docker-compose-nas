@@ -21,7 +21,7 @@ services:
       - traefik.enable=true
       - traefik.http.routers.homeassistant.rule=(Host(`${HOMEASSISTANT_HOSTNAME}`))
       - traefik.http.routers.homeassistant.tls=true
-      - traefik.http.routers.homeassistant.tls.certresolver=myresolver
+      - traefik.http.routers.homeassistant.tls.certresolver=${TRAEFIK_CERT_RESOLVER:-}
       - traefik.http.services.homeassistant.loadbalancer.server.port=8123
       - homepage.group=Apps
       - homepage.name=Home Assistant

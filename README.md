@@ -100,6 +100,9 @@ see [Optional Services](#optional-services) for more information.
 
 `cp .env.example .env`, edit to your needs then `docker compose up -d`.
 
+For a local `localhost` setup, leave `TRAEFIK_CERT_RESOLVER` empty to use Traefik's default certificate.
+Set `TRAEFIK_CERT_RESOLVER=myresolver` only when you have configured ACME and the required DNS provider credentials.
+
 For the first time, run `./update-config.sh` to update the applications base URLs and set the API keys in `.env`.
 
 If you want to show Jellyfin information in the homepage, create it in Jellyfin settings and fill `JELLYFIN_API_KEY`.
@@ -122,6 +125,7 @@ If you want to show Jellyfin information in the homepage, create it in Jellyfin 
 | `PIA_LOCAL_NETWORK`            | PIA local network                                                                                                                                                                                      | `192.168.0.0/16`                                 |
 | `HOSTNAME`                     | Hostname of the NAS, could be a local IP or a domain name                                                                                                                                              | `localhost`                                      |
 | `BASE_HOSTNAME`                | Base hostname of the NAS, useful if hostname is a subdomain                                                                                                                                            | `localhost`                                      |
+| `TRAEFIK_CERT_RESOLVER`        | Traefik certificate resolver to use for ACME certificates. Leave empty for local setups such as `localhost`, set to `myresolver` when DNS challenge credentials are configured.                     |                                                  |
 | `ADGUARD_HOSTNAME`             | Optional - AdGuard Home hostname used, if enabled                                                                                                                                                      |                                                  |
 | `ADGUARD_USERNAME`             | Optional - AdGuard Home username to show details in the homepage, if enabled                                                                                                                           |                                                  |
 | `ADGUARD_PASSWORD`             | Optional - AdGuard Home password to show details in the homepage, if enabled                                                                                                                           |                                                  |
@@ -319,7 +323,7 @@ You are free to use any DNS01 provider. Simply replace `DNS_CHALLENGE_PROVIDER` 
 [see complete list here](https://doc.traefik.io/traefik/https/acme/#providers).
 You will also need to inject the environments variables specific to your provider.
 
-Certificate generation can be disabled by setting `DNS_CHALLENGE` to `false`.
+Certificate generation can be disabled by leaving `TRAEFIK_CERT_RESOLVER` empty or by setting `DNS_CHALLENGE` to `false`.
 
 ### Accessing from the outside with Tailscale
 

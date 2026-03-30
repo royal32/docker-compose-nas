@@ -24,7 +24,7 @@ services:
       - traefik.enable=true
       - traefik.http.routers.paperless.rule=(Host(`${HOSTNAME}`) && PathPrefix(`/paperless`))
       - traefik.http.routers.paperless.tls=true
-      - traefik.http.routers.paperless.tls.certresolver=myresolver
+      - traefik.http.routers.paperless.tls.certresolver=${TRAEFIK_CERT_RESOLVER:-}
       - traefik.http.services.paperless.loadbalancer.server.port=8000
       - homepage.group=Apps
       - homepage.name=Paperless
