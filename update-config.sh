@@ -2,6 +2,9 @@
 
 set -euo pipefail
 
+ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+cd "$ROOT_DIR"
+
 # See https://stackoverflow.com/a/44864004 for the sed GNU/BSD compatible hack
 
 function update_arr_config {
@@ -73,7 +76,7 @@ function update_bazarr_config {
     docker compose restart "$container"
 }
 
-for container in $(docker ps --format '{{.Names}}'); do
+for container in $(docker compose ps --services --status running); do
   if [[ "$container" =~ ^(radarr|sonarr|lidarr|prowlarr)$ ]]; then
     update_arr_config "$container"
   elif [[ "$container" =~ ^(bazarr)$ ]]; then

@@ -52,4 +52,4 @@ services:
       - ${CONFIG_ROOT:-.}/vaultwarden/vw-data:/vw-data
       - ${CONFIG_ROOT:-.}/vaultwarden/backup:/config
     profiles:
-      - vaultwarden
+      - vaultwarden-backup

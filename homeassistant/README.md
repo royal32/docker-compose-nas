@@ -6,6 +6,8 @@ Open source home automation that puts local control and privacy first. Powered b
 
 Enable Home Assistant by setting `COMPOSE_PROFILES=homeassistant`.
 
+The automated path is `./setup-stack.sh --profiles homeassistant`.
+
 Set the `HOMEASSISTANT_HOSTNAME`, since it does not support
 [running in a subfolder](https://github.com/home-assistant/architecture/issues/156).
 Add the necessary DNS records in your domain.
@@ -85,8 +87,10 @@ docker compose run --rm -it homeassistant-backup rclone config
 
 It will generate a `rclone.conf` configuration file in ./homeassistant/rclone/rclone.conf.
 
+Enable the backup container separately with `COMPOSE_PROFILES=homeassistant,homeassistant-backup`.
+
 Copy the backup environment file to `backup.env` and fill it as needed:
-`cp backup.env.exmple backup.env`
+`cp backup.env.example backup.env`
 
 | Variable             | Description                                                         | Default                   |
 |----------------------|---------------------------------------------------------------------|---------------------------|

@@ -6,7 +6,7 @@
 
 Enable Tandoor by setting `COMPOSE_PROFILES=tandoor`. It will be accessible at `/recipes`.
 
-Copy the example environment file and edit as needed before running Tandoor: `cp tandoor/env.example tandoor/.env`.
+`./setup-stack.sh --profiles tandoor` will create `tandoor/.env` automatically. If you prefer to do it manually, copy `tandoor/.env.example` to `tandoor/.env` and edit as needed.
 
 ## Backup
 
@@ -20,8 +20,10 @@ docker compose run --rm -it tandoor-backup rclone config
 
 It will generate a `rclone.conf` configuration file in ./tandoor/rclone/rclone.conf.
 
+Enable the backup container separately with `COMPOSE_PROFILES=tandoor,tandoor-backup`.
+
 Copy the backup environment file to `backup.env` and fill it as needed:
-`cp backup.env.exmple backup.env`
+`cp backup.env.example backup.env`
 
 | Variable             | Description                                                         | Default                   |
 |----------------------|---------------------------------------------------------------------|---------------------------|

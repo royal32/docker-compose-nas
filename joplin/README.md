@@ -8,7 +8,7 @@ This service lets you host your own Joplin server, which your clients can connec
 
 Enable Joplin by setting `COMPOSE_PROFILES=joplin`. It will be accessible at `/joplin`.
 
-Copy the example environment file and edit as needed before running Joplin: `cp joplin/env.example joplin/.env`.
+`./setup-stack.sh --profiles joplin` will create `joplin/.env` automatically. If you prefer to do it manually, copy `joplin/.env.example` to `joplin/.env` and edit as needed.
 
 ## Backup
 
@@ -22,8 +22,10 @@ docker compose run --rm -it joplin-backup rclone config
 
 It will generate a `rclone.conf` configuration file in ./joplin/rclone/rclone.conf.
 
+Enable the backup container separately with `COMPOSE_PROFILES=joplin,joplin-backup`.
+
 Copy the backup environment file to `backup.env` and fill it as needed:
-`cp backup.env.exmple backup.env`
+`cp backup.env.example backup.env`
 
 | Variable               | Description                                                         | Default                   |
 |------------------------|---------------------------------------------------------------------|---------------------------|

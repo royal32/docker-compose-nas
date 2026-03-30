@@ -56,4 +56,4 @@ services:
       - ${CONFIG_ROOT:-.}/joplin/storage:/storage
       - ${CONFIG_ROOT:-.}/joplin/backup:/config
     profiles:
-      - joplin
+      - joplin-backup

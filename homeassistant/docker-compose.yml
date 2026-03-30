@@ -86,4 +86,4 @@ services:
       - ${CONFIG_ROOT:-.}/homeassistant/backups:/backups
       - ${CONFIG_ROOT:-.}/homeassistant/backup:/config
     profiles:
-      - homeassistant
+      - homeassistant-backup

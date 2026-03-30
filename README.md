@@ -98,12 +98,26 @@ see [Optional Services](#optional-services) for more information.
 
 ## Quick Start
 
-`cp .env.example .env`, edit to your needs then `docker compose up -d`.
+Run the automated bootstrap:
+
+```shell
+./setup-stack.sh
+```
+
+This will create `.env` if needed, detect local `USER_ID`, `GROUP_ID`, and `TIMEZONE`, create missing per-service env files for enabled profiles, validate the compose configuration, start the stack, run `./update-config.sh`, and wait for health checks.
 
 For a local `localhost` setup, leave `TRAEFIK_CERT_RESOLVER` empty to use Traefik's default certificate.
 Set `TRAEFIK_CERT_RESOLVER=myresolver` only when you have configured ACME and the required DNS provider credentials.
 
-For the first time, run `./update-config.sh` to update the applications base URLs and set the API keys in `.env`.
+Common examples:
+
+```shell
+./setup-stack.sh --profiles paperless,vaultwarden
+./setup-stack.sh --set DATA_ROOT=/srv/data --set DOWNLOAD_ROOT=/srv/data/torrents
+./setup-stack.sh --profiles tandoor,tandoor-backup
+```
+
+If you prefer to run the steps manually, the equivalent baseline flow is `cp .env.example .env`, edit to your needs, then `docker compose up -d` and `./update-config.sh`.
 
 If you want to show Jellyfin information in the homepage, create it in Jellyfin settings and fill `JELLYFIN_API_KEY`.
 
@@ -112,7 +126,7 @@ If you want to show Jellyfin information in the homepage, create it in Jellyfin 
 | Variable                       | Description                                                                                                                                                                                            | Default                                          |
 | ------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | ------------------------------------------------ |
 | `COMPOSE_FILE`                 | Docker compose files to load                                                                                                                                                                           |                                                  |
-| `COMPOSE_PROFILES`             | Docker compose profiles to load (`flaresolverr`, `adguardhome`, `sabnzbd`)                                                                                                                             |                                                  |
+| `COMPOSE_PROFILES`             | Docker compose profiles to load (`flaresolverr`, `adguardhome`, `sabnzbd`, `tandoor-backup`, `vaultwarden-backup`, etc.)                                                                              |                                                  |
 | `USER_ID`                      | ID of the user to use in Docker containers                                                                                                                                                             | `1000`                                           |
 | `GROUP_ID`                     | ID of the user group to use in Docker containers                                                                                                                                                       | `1000`                                           |
 | `TIMEZONE`                     | TimeZone used by the container.                                                                                                                                                                        | `America/New_York`                               |
