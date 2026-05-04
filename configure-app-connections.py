@@ -13,6 +13,7 @@ import subprocess
 import sys
 import time
 import uuid
+import xml.etree.ElementTree as ET
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -188,6 +189,89 @@ def update_env_file_value(env_path: Path, key: str, value: str, dry_run: bool) -
     lines.append(replacement)
     env_path.write_text("\n".join(lines) + "\n")
     return True
+
+
+def read_xml_text(path: Path, tag_name: str) -> str:
+    if not path.exists():
+        return ""
+
+    try:
+        root = ET.parse(path).getroot()
+    except ET.ParseError:
+        return ""
+
+    item = root.find(tag_name)
+    if item is None or item.text is None:
+        return ""
+    return item.text.strip()
+
+
+def read_bazarr_api_key(path: Path) -> str:
+    if not path.exists():
+        return ""
+
+    in_auth_section = False
+    for raw_line in path.read_text().splitlines():
+        line = raw_line.rstrip()
+        stripped = line.strip()
+        if not stripped or stripped.startswith("#"):
+            continue
+        if not line.startswith((" ", "\t")):
+            in_auth_section = stripped == "auth:"
+            continue
+        if in_auth_section and stripped.startswith("apikey:"):
+            return stripped.split(":", 1)[1].strip().strip("'\"")
+    return ""
+
+
+def sync_generated_api_keys(env: dict[str, str], dry_run: bool) -> bool:
+    env_path = ROOT_DIR / ".env"
+    discovered = {
+        "SONARR_API_KEY": read_xml_text(ROOT_DIR / "sonarr" / "config.xml", "ApiKey"),
+        "RADARR_API_KEY": read_xml_text(ROOT_DIR / "radarr" / "config.xml", "ApiKey"),
+        "LIDARR_API_KEY": read_xml_text(ROOT_DIR / "lidarr" / "config.xml", "ApiKey"),
+        "PROWLARR_API_KEY": read_xml_text(ROOT_DIR / "prowlarr" / "config.xml", "ApiKey"),
+        "BAZARR_API_KEY": read_bazarr_api_key(ROOT_DIR / "bazarr" / "config" / "config" / "config.yaml"),
+    }
+
+    seerr_settings_path = ROOT_DIR / "seerr" / "settings.json"
+    if seerr_settings_path.exists():
+        try:
+            seerr_settings = json.loads(seerr_settings_path.read_text())
+            discovered["SEERR_API_KEY"] = seerr_settings.get("main", {}).get("apiKey", "")
+            discovered["JELLYFIN_API_KEY"] = seerr_settings.get("jellyfin", {}).get("apiKey", "")
+        except json.JSONDecodeError:
+            pass
+
+    changed = False
+    for key, value in discovered.items():
+        if not value:
+            continue
+        if env.get(key) == value:
+            continue
+        changed = update_env_file_value(env_path, key, value, dry_run) or changed
+        env[key] = value
+
+    if changed:
+        log("Synced generated API keys into .env")
+    return changed
+
+
+def reapply_homepage_label_services(running_services: set[str], dry_run: bool) -> None:
+    label_services = [
+        service
+        for service in ("homepage", "jellyfin", "seerr", "sonarr", "radarr", "lidarr", "prowlarr", "bazarr")
+        if service in running_services
+    ]
+    if not label_services:
+        return
+
+    if dry_run:
+        log(f"[dry-run] Would recreate services with Homepage labels: {', '.join(label_services)}")
+        return
+
+    run_compose(["up", "-d", "--no-deps", *label_services])
+    log("Reapplied services with Homepage labels after .env key sync")
 
 
 def next_settings_id(items: list[dict[str, Any]]) -> int:
@@ -1386,6 +1470,9 @@ def main() -> int:
 
     if not args.skip_seerr:
         ensure_seerr_integrations(env, running_services, args.dry_run)
+
+    if sync_generated_api_keys(env, args.dry_run):
+        reapply_homepage_label_services(running_services, args.dry_run)
 
     log("App connection automation complete")
     return 0
