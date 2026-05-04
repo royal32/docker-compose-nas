@@ -5,6 +5,7 @@ from __future__ import annotations
 import argparse
 import copy
 import json
+import re
 import shlex
 import ssl
 import subprocess
@@ -18,6 +19,8 @@ from urllib import error, parse, request
 
 ROOT_DIR = Path(__file__).resolve().parent
 SSL_CONTEXT = ssl._create_unverified_context()
+ENV_VAR_PATTERN = re.compile(r"\$\{([^}:]+)(:-([^}]*))?\}")
+SEERR_MEDIA_SERVER_TYPE_JELLYFIN = 4
 
 
 @dataclass(frozen=True)
@@ -97,6 +100,63 @@ def parse_env_file(env_path: Path) -> dict[str, str]:
         values[key] = value
 
     return values
+
+
+def resolve_env_values(values: dict[str, str]) -> dict[str, str]:
+    def expand(value: str, depth: int = 0) -> str:
+        if depth > 10:
+            return value
+
+        def replace(match: re.Match[str]) -> str:
+            key = match.group(1)
+            default = match.group(3) or ""
+            replacement = values.get(key, default)
+            return expand(replacement, depth + 1)
+
+        return ENV_VAR_PATTERN.sub(replace, value)
+
+    return {key: expand(value) for key, value in values.items()}
+
+
+def env_bool(env: dict[str, str], key: str, default: bool) -> bool:
+    value = env.get(key)
+    if value is None or value == "":
+        return default
+    return value.strip().lower() in {"1", "true", "yes", "on"}
+
+
+def update_env_file_value(env_path: Path, key: str, value: str, dry_run: bool) -> bool:
+    lines = env_path.read_text().splitlines()
+    replacement = f"{key}={value}"
+
+    for index, line in enumerate(lines):
+        if line.startswith(f"{key}="):
+            if line == replacement:
+                return False
+            if dry_run:
+                log(f"[dry-run] Would update {env_path.name}: {key}")
+                return True
+            lines[index] = replacement
+            env_path.write_text("\n".join(lines) + "\n")
+            return True
+
+    if dry_run:
+        log(f"[dry-run] Would append {env_path.name}: {key}")
+        return True
+
+    lines.append(replacement)
+    env_path.write_text("\n".join(lines) + "\n")
+    return True
+
+
+def next_settings_id(items: list[dict[str, Any]]) -> int:
+    return max((int(item.get("id", -1)) for item in items), default=-1) + 1
+
+
+def build_https_url(host: str, path: str = "") -> str:
+    if not host or "${" in host:
+        return ""
+    return f"https://{host}{path}"
 
 
 def run_compose(args: list[str], check: bool = True) -> subprocess.CompletedProcess[str]:
@@ -330,6 +390,15 @@ class ArrApi:
     def get_root_folders(self) -> list[dict[str, Any]]:
         return self.client.request_json("GET", "/api/v3/rootfolder") or []
 
+    def get_quality_profiles(self) -> list[dict[str, Any]]:
+        return self.client.request_json("GET", "/api/v3/qualityprofile") or []
+
+    def get_language_profiles(self) -> list[dict[str, Any]]:
+        try:
+            return self.client.request_json("GET", "/api/v3/languageprofile") or []
+        except RuntimeError:
+            return []
+
     def create_root_folder(self, path: str) -> None:
         self.client.request_json("POST", "/api/v3/rootfolder", payload={"path": path})
 
@@ -389,6 +458,23 @@ class ProwlarrApi:
         raise RuntimeError("\n".join(errors))
 
 
+class JellyfinApi(ContainerJsonClient):
+    def __init__(self) -> None:
+        super().__init__("jellyfin", "http://127.0.0.1:8096/jellyfin")
+
+    def get_public_info(self) -> dict[str, Any]:
+        command = [
+            "exec",
+            "-T",
+            "jellyfin",
+            "curl",
+            "-sS",
+            f"{self.base_url}/System/Info/Public",
+        ]
+        result = run_compose(command)
+        return json.loads(result.stdout)
+
+
 def field_value_map(fields: list[dict[str, Any]]) -> dict[str, Any]:
     return {field["name"]: field.get("value") for field in fields}
 
@@ -407,6 +493,229 @@ def schema_by_implementation(schema: list[dict[str, Any]], implementation: str) 
             return copy.deepcopy(item)
 
     raise RuntimeError(f"Schema for implementation {implementation} was not found")
+
+
+def select_profile(profiles: list[dict[str, Any]], preferred_name: str) -> dict[str, Any]:
+    if not profiles:
+        raise RuntimeError("No quality profiles were returned by the Arr service")
+
+    candidates = []
+    if preferred_name:
+        candidates.append(preferred_name)
+    candidates.extend(["HD-1080p", "HD - 720p/1080p", "Any"])
+
+    for candidate in candidates:
+        for profile in profiles:
+            if profile.get("name", "").lower() == candidate.lower():
+                return profile
+
+    return profiles[0]
+
+
+def select_language_profile(profiles: list[dict[str, Any]], preferred_name: str) -> dict[str, Any] | None:
+    if not profiles:
+        return None
+
+    if preferred_name:
+        for profile in profiles:
+            if profile.get("name", "").lower() == preferred_name.lower():
+                return profile
+
+    return profiles[0]
+
+
+def upsert_seerr_service(
+    settings_list: list[dict[str, Any]],
+    desired: dict[str, Any],
+) -> tuple[str, bool]:
+    existing = next(
+        (
+            item
+            for item in settings_list
+            if not item.get("is4k") and item.get("name") == desired["name"]
+        ),
+        None,
+    )
+    if existing is None:
+        existing = next((item for item in settings_list if not item.get("is4k")), None)
+
+    if existing is None:
+        created = dict(desired)
+        created["id"] = next_settings_id(settings_list)
+        settings_list.append(created)
+        for item in settings_list:
+            if item is not created and item.get("is4k") == created["is4k"] and item.get("isDefault"):
+                item["isDefault"] = False
+        return "Created", True
+
+    changed = False
+    for key, value in desired.items():
+        if existing.get(key) != value:
+            existing[key] = value
+            changed = True
+
+    for item in settings_list:
+        if item is existing:
+            continue
+        if item.get("is4k") == existing.get("is4k") and item.get("isDefault"):
+            item["isDefault"] = False
+            changed = True
+
+    return ("Updated", True) if changed else ("Already matches", False)
+
+
+def build_seerr_radarr_settings(arr_api: ArrApi, env: dict[str, str]) -> dict[str, Any]:
+    profiles = arr_api.get_quality_profiles()
+    profile = select_profile(profiles, env.get("SEERR_RADARR_PROFILE", ""))
+
+    return {
+        "name": arr_api.service.display_name,
+        "hostname": arr_api.service.service_name,
+        "port": 7878,
+        "apiKey": env[arr_api.service.api_key_env],
+        "useSsl": False,
+        "baseUrl": arr_api.service.url_base,
+        "activeProfileId": profile["id"],
+        "activeProfileName": profile["name"],
+        "activeDirectory": env[arr_api.service.root_folder_env],
+        "tags": [],
+        "is4k": False,
+        "isDefault": True,
+        "externalUrl": build_https_url(env.get("HOSTNAME", ""), arr_api.service.url_base),
+        "syncEnabled": env_bool(env, "SEERR_SYNC_ENABLED", True),
+        "preventSearch": not env_bool(env, "SEERR_AUTO_SEARCH", True),
+        "tagRequests": False,
+        "overrideRule": [],
+        "minimumAvailability": env.get("SEERR_RADARR_MINIMUM_AVAILABILITY", "released") or "released",
+    }
+
+
+def build_seerr_sonarr_settings(arr_api: ArrApi, env: dict[str, str]) -> dict[str, Any]:
+    profiles = arr_api.get_quality_profiles()
+    profile = select_profile(profiles, env.get("SEERR_SONARR_PROFILE", ""))
+    language_profiles = arr_api.get_language_profiles()
+    language_profile = select_language_profile(language_profiles, env.get("SEERR_SONARR_LANGUAGE_PROFILE", ""))
+
+    desired: dict[str, Any] = {
+        "name": arr_api.service.display_name,
+        "hostname": arr_api.service.service_name,
+        "port": 8989,
+        "apiKey": env[arr_api.service.api_key_env],
+        "useSsl": False,
+        "baseUrl": arr_api.service.url_base,
+        "activeProfileId": profile["id"],
+        "activeProfileName": profile["name"],
+        "activeDirectory": env[arr_api.service.root_folder_env],
+        "tags": [],
+        "is4k": False,
+        "isDefault": True,
+        "externalUrl": build_https_url(env.get("HOSTNAME", ""), arr_api.service.url_base),
+        "syncEnabled": env_bool(env, "SEERR_SYNC_ENABLED", True),
+        "preventSearch": not env_bool(env, "SEERR_AUTO_SEARCH", True),
+        "tagRequests": False,
+        "overrideRule": [],
+        "seriesType": "standard",
+        "animeSeriesType": "anime",
+        "activeAnimeProfileId": profile["id"],
+        "activeAnimeProfileName": profile["name"],
+        "activeAnimeDirectory": env[arr_api.service.root_folder_env],
+        "animeTags": [],
+        "enableSeasonFolders": env_bool(env, "SEERR_SONARR_SEASON_FOLDERS", True),
+        "monitorNewItems": "all",
+    }
+
+    if language_profile is not None:
+        desired["activeLanguageProfileId"] = language_profile["id"]
+        desired["activeAnimeLanguageProfileId"] = language_profile["id"]
+
+    return desired
+
+
+def ensure_seerr_integrations(env: dict[str, str], running_services: set[str], dry_run: bool) -> None:
+    if "seerr" not in running_services:
+        log("Skipping Seerr automation because the service is not running")
+        return
+
+    settings_path = ROOT_DIR / "seerr" / "settings.json"
+    settings = json.loads(settings_path.read_text())
+    settings_changed = False
+    env_changed = False
+
+    seerr_api_key = settings.get("main", {}).get("apiKey", "")
+    if seerr_api_key:
+        env_changed = update_env_file_value(ROOT_DIR / ".env", "SEERR_API_KEY", seerr_api_key, dry_run) or env_changed
+        if env_changed:
+            env["SEERR_API_KEY"] = seerr_api_key
+
+    seerr_application_url = build_https_url(env.get("SEERR_HOSTNAME", ""))
+    if seerr_application_url and settings.get("main", {}).get("applicationUrl") != seerr_application_url:
+        settings.setdefault("main", {})["applicationUrl"] = seerr_application_url
+        settings_changed = True
+
+    if "jellyfin" in running_services:
+        jellyfin_public_info = JellyfinApi().get_public_info()
+        jellyfin_external_url = env.get("SEERR_JELLYFIN_EXTERNAL_URL", "") or build_https_url(env.get("HOSTNAME", ""), "/jellyfin")
+        jellyfin_settings = settings.setdefault("jellyfin", {})
+        desired_jellyfin = {
+            "name": jellyfin_public_info.get("ServerName", jellyfin_settings.get("name", "")),
+            "ip": "jellyfin",
+            "port": 8096,
+            "useSsl": False,
+            "urlBase": "/jellyfin",
+            "externalHostname": jellyfin_external_url,
+            "serverId": jellyfin_public_info.get("Id", jellyfin_settings.get("serverId", "")),
+        }
+        if env.get("JELLYFIN_API_KEY"):
+            desired_jellyfin["apiKey"] = env["JELLYFIN_API_KEY"]
+
+        for key, value in desired_jellyfin.items():
+            if jellyfin_settings.get(key) != value:
+                jellyfin_settings[key] = value
+                settings_changed = True
+
+        if settings.get("main", {}).get("mediaServerType") != SEERR_MEDIA_SERVER_TYPE_JELLYFIN:
+            settings.setdefault("main", {})["mediaServerType"] = SEERR_MEDIA_SERVER_TYPE_JELLYFIN
+            settings_changed = True
+
+    for arr_service in ARR_SERVICES:
+        if arr_service.service_name == "lidarr":
+            continue
+        if arr_service.service_name not in running_services:
+            continue
+        if not env.get(arr_service.api_key_env):
+            log(f"Skipping Seerr {arr_service.display_name} integration because {arr_service.api_key_env} is empty")
+            continue
+
+        arr_api = ArrApi(arr_service, env[arr_service.api_key_env])
+        if arr_service.service_name == "radarr":
+            desired = build_seerr_radarr_settings(arr_api, env)
+            action, changed = upsert_seerr_service(settings.setdefault("radarr", []), desired)
+        else:
+            desired = build_seerr_sonarr_settings(arr_api, env)
+            action, changed = upsert_seerr_service(settings.setdefault("sonarr", []), desired)
+
+        if changed:
+            settings_changed = True
+            log(f"{action} Seerr {arr_service.display_name} service settings")
+        else:
+            log(f"Seerr {arr_service.display_name} service settings already match the desired state")
+
+    if dry_run:
+        if settings_changed:
+            log("[dry-run] Would update Seerr settings.json")
+        return
+
+    if settings_changed:
+        settings_path.write_text(json.dumps(settings, indent=1) + "\n")
+
+    if env_changed:
+        run_compose(["up", "-d", "seerr"])
+        log("Updated Seerr API key in .env and reapplied the Seerr service")
+    elif settings_changed:
+        run_compose(["restart", "seerr"])
+        log("Updated Seerr settings and restarted Seerr")
+    else:
+        log("Seerr settings already match the desired state")
 
 
 def ensure_directory(service: str, path: str, dry_run: bool) -> None:
@@ -663,10 +972,12 @@ def main() -> int:
     parser.add_argument("--skip-qbittorrent", action="store_true", help="Skip qBittorrent path and category updates")
     parser.add_argument("--skip-arr", action="store_true", help="Skip Sonarr/Radarr/Lidarr root folders and download clients")
     parser.add_argument("--skip-prowlarr", action="store_true", help="Skip Prowlarr application links")
+    parser.add_argument("--skip-seerr", action="store_true", help="Skip Seerr service and media-server preconfiguration")
     args = parser.parse_args()
 
     env = parse_env_file(ROOT_DIR / ".env.example")
     env.update(parse_env_file(ROOT_DIR / ".env"))
+    env = resolve_env_values(env)
     running_services = compose_running_services()
 
     if not args.skip_qbittorrent:
@@ -677,6 +988,9 @@ def main() -> int:
 
     if not args.skip_prowlarr:
         ensure_prowlarr_integrations(env, running_services, args.dry_run)
+
+    if not args.skip_seerr:
+        ensure_seerr_integrations(env, running_services, args.dry_run)
 
     log("App connection automation complete")
     return 0

@@ -104,7 +104,7 @@ Run the automated bootstrap:
 ./setup-stack.sh
 ```
 
-This will create `.env` if needed, detect local `USER_ID`, `GROUP_ID`, and `TIMEZONE`, create missing per-service env files for enabled profiles, validate the compose configuration, start the stack, run `./update-config.sh`, automate the qBittorrent, Sonarr, Radarr, Lidarr, and Prowlarr connections when those services are enabled, and wait for health checks.
+This will create `.env` if needed, detect local `USER_ID`, `GROUP_ID`, and `TIMEZONE`, create missing per-service env files for enabled profiles, validate the compose configuration, start the stack, run `./update-config.sh`, automate the qBittorrent, Sonarr, Radarr, Prowlarr, and Seerr connections when those services are enabled, and wait for health checks.
 
 For a local `localhost` setup, leave `TRAEFIK_CERT_RESOLVER` empty to use Traefik's default certificate.
 Set `TRAEFIK_CERT_RESOLVER=myresolver` only when you have configured ACME and the required DNS provider credentials.
@@ -181,7 +181,15 @@ If you want to show Jellyfin information in the homepage, create it in Jellyfin 
 | `HOMEPAGE_VAR_WEATHER_UNIT`    | Homepage weather unit, either `metric` or `imperial`                                                                                                                                                   | `metric`                                         |
 | `CALIBRE_USERNAME`             | Optional - Calibre-Web username to show details in the homepage, if enabled                                                                                                                            | `admin`                                          |
 | `CALIBRE_PASSWORD`             | Optional - Calibre-Web password to show details in the homepage, if enabled                                                                                                                            | `admin123`                                       |
-| `SEERR_HOSTNAME`          | Seerr hostname used                                                                                                                                                                               |                                                  |
+| `SEERR_HOSTNAME`               | Seerr hostname used                                                                                                                                                                                   |                                                  |
+| `SEERR_RADARR_PROFILE`         | Radarr quality profile name selected automatically for Seerr movie requests                                                                                                                            | `HD-1080p`                                       |
+| `SEERR_RADARR_MINIMUM_AVAILABILITY` | Radarr minimum availability used for Seerr movie requests                                                                                                                                        | `released`                                       |
+| `SEERR_SONARR_PROFILE`         | Sonarr quality profile name selected automatically for Seerr series requests                                                                                                                           | `HD-1080p`                                       |
+| `SEERR_SONARR_LANGUAGE_PROFILE` | Optional Sonarr language profile name to use in Seerr; leave blank to use the first available profile                                                                                              |                                                  |
+| `SEERR_SONARR_SEASON_FOLDERS`  | Whether Seerr-created Sonarr requests should enable season folders                                                                                                                                     | `true`                                           |
+| `SEERR_SYNC_ENABLED`           | Whether Seerr should enable periodic sync against Sonarr/Radarr                                                                                                                                       | `true`                                           |
+| `SEERR_AUTO_SEARCH`            | Whether Seerr should enable automatic search for approved Sonarr/Radarr requests                                                                                                                       | `true`                                           |
+| `SEERR_JELLYFIN_EXTERNAL_URL`  | Optional external Jellyfin URL used in Seerr; defaults to `https://${HOSTNAME}/jellyfin` when left empty                                                                                              |                                                  |
 
 ## PIA WireGuard VPN
 
@@ -307,17 +315,29 @@ Set the `SEERR_HOSTNAME`, since it does not support
 [running in a subfolder](https://github.com/seerr-team/seerr/pull/1411).
 Add the necessary DNS records in your domain.
 
-To set up, go to the Seerr hostname, and set the URLs as follows:
+`./setup-stack.sh` now preconfigures Seerr's Sonarr and Radarr services automatically, syncs Seerr's API key back into `.env` for the Homepage widget, and also preconfigures Jellyfin connection details when Jellyfin is enabled.
+
+The one intentional manual step is the first Seerr admin sign-in. Seerr creates its initial admin user during its own setup flow, so the stack automation does not force `initialized=true` ahead of that.
+
+If `JELLYFIN_API_KEY` is set, rerunning the connection automation will also store that key in Seerr's media-server settings. If it is left empty, the Seerr preconfiguration still seeds the Sonarr/Radarr side and leaves Jellyfin authentication to the normal Seerr setup flow.
+
+If you want to run just the integration step again, use:
+
+```shell
+./configure-app-connections.py
+```
+
+The values used are:
 
 - Jellyfin: http://jellyfin:8096/jellyfin
 - Radarr:
-  - Hostname: radarr
-  - Port: 7878
-  - URL Base: /radarr
-- Sonarr
-  - Hostname: sonarr
-  - Port: 8989
-  - URL Base: /sonarr
+  - Hostname: `radarr`
+  - Port: `7878`
+  - URL Base: `/radarr`
+- Sonarr:
+  - Hostname: `sonarr`
+  - Port: `8989`
+  - URL Base: `/sonarr`
 
 ## Traefik and SSL Certificates
 
