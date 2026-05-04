@@ -190,6 +190,9 @@ If you want to show Jellyfin information in the homepage, create it in Jellyfin 
 | `SEERR_SYNC_ENABLED`           | Whether Seerr should enable periodic sync against Sonarr/Radarr                                                                                                                                       | `true`                                           |
 | `SEERR_AUTO_SEARCH`            | Whether Seerr should enable automatic search for approved Sonarr/Radarr requests                                                                                                                       | `true`                                           |
 | `SEERR_JELLYFIN_EXTERNAL_URL`  | Optional external Jellyfin URL used in Seerr; defaults to `https://${HOSTNAME}/jellyfin` when left empty                                                                                              |                                                  |
+| `SEERR_JELLYFIN_ADMIN_USERNAME` | Optional Jellyfin admin username used once by setup automation to complete Seerr's initial Jellyfin connection and create Seerr's Jellyfin API key                                                   |                                                  |
+| `SEERR_JELLYFIN_ADMIN_PASSWORD` | Optional Jellyfin admin password used once with `SEERR_JELLYFIN_ADMIN_USERNAME`                                                                                                                       |                                                  |
+| `SEERR_JELLYFIN_ADMIN_EMAIL`   | Optional email address for the Seerr admin user created during automated Jellyfin setup; defaults to `SEERR_JELLYFIN_ADMIN_USERNAME`                                                                  |                                                  |
 
 ## PIA WireGuard VPN
 
@@ -315,11 +318,11 @@ Set the `SEERR_HOSTNAME`, since it does not support
 [running in a subfolder](https://github.com/seerr-team/seerr/pull/1411).
 Add the necessary DNS records in your domain.
 
-`./setup-stack.sh` now preconfigures Seerr's Sonarr and Radarr services automatically, syncs Seerr's API key back into `.env` for the Homepage widget, and also preconfigures Jellyfin connection details when Jellyfin is enabled.
+`./setup-stack.sh` now preconfigures Seerr's Sonarr and Radarr services automatically, syncs Seerr's API key back into `.env` for the Homepage widget, and preconfigures Jellyfin connection details when Jellyfin is enabled.
 
-The one intentional manual step is the first Seerr admin sign-in. Seerr creates its initial admin user during its own setup flow, so the stack automation does not force `initialized=true` ahead of that.
+If `SEERR_JELLYFIN_ADMIN_USERNAME` and `SEERR_JELLYFIN_ADMIN_PASSWORD` are set before setup runs, the automation will also complete Seerr's initial Jellyfin connection, create Seerr's Jellyfin API key, mark Seerr's initial setup complete, and sync that key back into `JELLYFIN_API_KEY` for the Homepage widget.
 
-If `JELLYFIN_API_KEY` is set, rerunning the connection automation will also store that key in Seerr's media-server settings. If it is left empty, the Seerr preconfiguration still seeds the Sonarr/Radarr side and leaves Jellyfin authentication to the normal Seerr setup flow.
+If those credentials are left empty, the Seerr preconfiguration still seeds the Sonarr/Radarr side and Jellyfin host details, but leaves the first Seerr admin sign-in to the normal Seerr setup flow. If `JELLYFIN_API_KEY` is already set, rerunning the connection automation will store that key in Seerr's media-server settings.
 
 If you want to run just the integration step again, use:
 

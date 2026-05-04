@@ -7,6 +7,7 @@ import copy
 import json
 import re
 import shlex
+import sqlite3
 import ssl
 import subprocess
 import sys
@@ -475,6 +476,28 @@ class JellyfinApi(ContainerJsonClient):
         return json.loads(result.stdout)
 
 
+class SeerrApi(ContainerJsonClient):
+    def __init__(self, api_key: str = "") -> None:
+        headers = {"X-API-Key": api_key} if api_key else None
+        super().__init__("jellyfin", "http://seerr:5055", default_headers=headers)
+
+    def authenticate_jellyfin_admin(self, env: dict[str, str]) -> dict[str, Any]:
+        payload = {
+            "username": env["SEERR_JELLYFIN_ADMIN_USERNAME"],
+            "password": env["SEERR_JELLYFIN_ADMIN_PASSWORD"],
+            "hostname": "jellyfin",
+            "port": 8096,
+            "urlBase": "/jellyfin",
+            "useSsl": False,
+            "email": env.get("SEERR_JELLYFIN_ADMIN_EMAIL", "") or env["SEERR_JELLYFIN_ADMIN_USERNAME"],
+            "serverType": SEERR_MEDIA_SERVER_TYPE_JELLYFIN,
+        }
+        return self.request_json("POST", "/api/v1/auth/jellyfin", payload=payload) or {}
+
+    def initialize(self) -> None:
+        self.request_json("POST", "/api/v1/settings/initialize")
+
+
 def field_value_map(fields: list[dict[str, Any]]) -> dict[str, Any]:
     return {field["name"]: field.get("value") for field in fields}
 
@@ -631,6 +654,87 @@ def build_seerr_sonarr_settings(arr_api: ArrApi, env: dict[str, str]) -> dict[st
     return desired
 
 
+def seerr_user_count() -> int | None:
+    db_path = ROOT_DIR / "seerr" / "db" / "db.sqlite3"
+    if not db_path.exists():
+        return None
+
+    try:
+        with sqlite3.connect(db_path) as connection:
+            row = connection.execute('select count(*) from "user"').fetchone()
+            return int(row[0])
+    except sqlite3.Error:
+        return None
+
+
+def clear_seeded_jellyfin_settings_for_initial_setup(settings: dict[str, Any]) -> bool:
+    jellyfin_settings = settings.setdefault("jellyfin", {})
+    desired_empty_values: dict[str, Any] = {
+        "name": "",
+        "ip": "",
+        "port": 8096,
+        "useSsl": False,
+        "urlBase": "",
+        "externalHostname": "",
+        "serverId": "",
+        "apiKey": "",
+    }
+
+    changed = False
+    for key, value in desired_empty_values.items():
+        if jellyfin_settings.get(key) != value:
+            jellyfin_settings[key] = value
+            changed = True
+
+    return changed
+
+
+def ensure_seerr_jellyfin_admin_setup(settings_path: Path, settings: dict[str, Any], env: dict[str, str], dry_run: bool) -> dict[str, Any]:
+    username = env.get("SEERR_JELLYFIN_ADMIN_USERNAME", "")
+    password = env.get("SEERR_JELLYFIN_ADMIN_PASSWORD", "")
+    if not username and not password:
+        return settings
+    if not username or not password:
+        log("Skipping Seerr Jellyfin initial setup because SEERR_JELLYFIN_ADMIN_USERNAME or SEERR_JELLYFIN_ADMIN_PASSWORD is empty")
+        return settings
+
+    if settings.get("jellyfin", {}).get("apiKey"):
+        log("Seerr Jellyfin API key already exists")
+        return settings
+
+    user_count = seerr_user_count()
+    if user_count not in (0, None):
+        log("Skipping Seerr Jellyfin initial setup because Seerr already has users")
+        return settings
+
+    if dry_run:
+        log("[dry-run] Would authenticate Seerr to Jellyfin and create the Seerr Jellyfin API key")
+        return settings
+
+    if clear_seeded_jellyfin_settings_for_initial_setup(settings):
+        settings_path.write_text(json.dumps(settings, indent=1) + "\n")
+        run_compose(["restart", "seerr"])
+        log("Cleared pre-seeded Jellyfin settings before Seerr initial setup")
+
+    try:
+        SeerrApi().authenticate_jellyfin_admin(env)
+    except RuntimeError as exc:
+        raise RuntimeError(
+            "Seerr could not authenticate to Jellyfin. Check "
+            "SEERR_JELLYFIN_ADMIN_USERNAME and SEERR_JELLYFIN_ADMIN_PASSWORD in .env."
+        ) from exc
+    log("Authenticated Seerr to Jellyfin and created the Seerr Jellyfin API key")
+    settings = json.loads(settings_path.read_text())
+
+    seerr_api_key = settings.get("main", {}).get("apiKey", "")
+    if seerr_api_key and not settings.get("public", {}).get("initialized"):
+        SeerrApi(seerr_api_key).initialize()
+        log("Marked Seerr initial setup complete")
+        settings = json.loads(settings_path.read_text())
+
+    return settings
+
+
 def ensure_seerr_integrations(env: dict[str, str], running_services: set[str], dry_run: bool) -> None:
     if "seerr" not in running_services:
         log("Skipping Seerr automation because the service is not running")
@@ -641,11 +745,20 @@ def ensure_seerr_integrations(env: dict[str, str], running_services: set[str], d
     settings_changed = False
     env_changed = False
 
+    if "jellyfin" in running_services:
+        settings = ensure_seerr_jellyfin_admin_setup(settings_path, settings, env, dry_run)
+
     seerr_api_key = settings.get("main", {}).get("apiKey", "")
     if seerr_api_key:
         env_changed = update_env_file_value(ROOT_DIR / ".env", "SEERR_API_KEY", seerr_api_key, dry_run) or env_changed
         if env_changed:
             env["SEERR_API_KEY"] = seerr_api_key
+
+    jellyfin_api_key = settings.get("jellyfin", {}).get("apiKey", "")
+    if jellyfin_api_key:
+        env_changed = update_env_file_value(ROOT_DIR / ".env", "JELLYFIN_API_KEY", jellyfin_api_key, dry_run) or env_changed
+        if env_changed:
+            env["JELLYFIN_API_KEY"] = jellyfin_api_key
 
     seerr_application_url = build_https_url(env.get("SEERR_HOSTNAME", ""))
     if seerr_application_url and settings.get("main", {}).get("applicationUrl") != seerr_application_url:
