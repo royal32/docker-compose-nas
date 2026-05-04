@@ -7,6 +7,102 @@ cd "$ROOT_DIR"
 
 # See https://stackoverflow.com/a/44864004 for the sed GNU/BSD compatible hack
 
+function strip_wrapping_quotes {
+  local value="$1"
+  if [[ "$value" == \"*\" && "$value" == *\" ]]; then
+    value="${value:1:${#value}-2}"
+  fi
+  printf '%s' "$value"
+}
+
+function get_env_value {
+  local key="$1"
+  local line
+
+  line=$(awk -F= -v key="$key" '$1 == key { print substr($0, index($0, "=") + 1) }' .env | tail -n 1)
+  if [[ -z "$line" ]] && ! grep -q -E "^${key}=" .env; then
+    return 1
+  fi
+
+  strip_wrapping_quotes "$line"
+}
+
+function effective_env_value {
+  local key="$1"
+  local fallback="$2"
+  local value
+
+  value=$(get_env_value "$key" || true)
+  if [[ -n "$value" ]]; then
+    printf '%s' "$value"
+    return 0
+  fi
+
+  printf '%s' "$fallback"
+}
+
+function qbit_password_hash {
+  python3 - "$1" "${2:-}" <<'PY'
+import base64
+import hashlib
+import os
+import re
+import sys
+
+password = sys.argv[1].encode("utf-8")
+existing = sys.argv[2].strip().strip('"')
+match = re.fullmatch(r"@ByteArray\(([^:]+):([^)]+)\)", existing)
+if match:
+    try:
+        salt = base64.b64decode(match.group(1))
+        expected = base64.b64decode(match.group(2))
+        actual = hashlib.pbkdf2_hmac("sha512", password, salt, 100000)
+        if actual == expected:
+            print(existing)
+            raise SystemExit(0)
+    except Exception:
+        pass
+
+salt = os.urandom(16)
+digest = hashlib.pbkdf2_hmac("sha512", password, salt, 100000)
+print(f"@ByteArray({base64.b64encode(salt).decode()}:{base64.b64encode(digest).decode()})")
+PY
+}
+
+function get_qbit_config_value {
+    local config_file="$1"
+    local key="$2"
+
+    awk -v key="$key" '
+      index($0, key "=") == 1 {
+        print substr($0, length(key) + 2)
+      }
+    ' "$config_file" | tail -n 1
+}
+
+function set_qbit_config_value {
+    local config_file="$1"
+    local key="$2"
+    local value="$3"
+    local tmp_file
+
+    tmp_file=$(mktemp)
+    awk -v key="$key" -v value="$value" '
+        index($0, key "=") == 1 {
+          print key "=" value
+          updated=1
+          next
+        }
+        { print }
+        END {
+          if (!updated) {
+            print key "=" value
+          }
+        }
+      ' "$config_file" > "$tmp_file"
+    mv "$tmp_file" "$config_file"
+}
+
 function update_arr_config {
   echo "Updating ${container} configuration..."
   until [ -f "${CONFIG_ROOT:-.}"/"$container"/config.xml ]; do sleep 1; done
@@ -21,31 +117,21 @@ function update_qbittorrent_config {
     echo "Updating ${container} configuration..."
     docker compose stop "$container"
     local qbittorrent_config="${CONFIG_ROOT:-.}"/"$container"/qBittorrent/qBittorrent.conf
+    local admin_username
+    local global_password
+    local qbittorrent_username
+    local qbittorrent_password
+    local existing_password_hash
     until [ -f "$qbittorrent_config" ]; do sleep 1; done
 
-    if grep -q '^WebUI\\Password_PBKDF2=' "$qbittorrent_config"; then
-      sed -i.bak 's|^WebUI\\Password_PBKDF2=.*|WebUI\\Password_PBKDF2="@ByteArray(ARQ77eY1NUZaQsuDHbIMCA==:0WMRkYTUWVT9wVvdDtHAjU9b3b7uB8NR1Gur2hmQCvCDpm39Q+PsJRJPaCU51dEiz+dTzh8qbPsL8WkFljQYFQ==)"|' "$qbittorrent_config"
-    else
-      local tmp_file
-      tmp_file=$(mktemp)
-      awk '
-        /WebUI\\ServerDomains=\*/ && !inserted {
-          print
-          print "WebUI\\Password_PBKDF2=\"@ByteArray(ARQ77eY1NUZaQsuDHbIMCA==:0WMRkYTUWVT9wVvdDtHAjU9b3b7uB8NR1Gur2hmQCvCDpm39Q+PsJRJPaCU51dEiz+dTzh8qbPsL8WkFljQYFQ==)\""
-          inserted=1
-          next
-        }
-        { print }
-        END {
-          if (!inserted) {
-            print "WebUI\\Password_PBKDF2=\"@ByteArray(ARQ77eY1NUZaQsuDHbIMCA==:0WMRkYTUWVT9wVvdDtHAjU9b3b7uB8NR1Gur2hmQCvCDpm39Q+PsJRJPaCU51dEiz+dTzh8qbPsL8WkFljQYFQ==)\""
-          }
-        }
-      ' "$qbittorrent_config" > "$tmp_file"
-      mv "$tmp_file" "$qbittorrent_config"
-    fi
+    admin_username=$(effective_env_value "ADMIN_USERNAME" "admin")
+    global_password=$(effective_env_value "GLOBAL_PASSWORD" "adminadmin")
+    qbittorrent_username=$(effective_env_value "QBITTORRENT_USERNAME" "$admin_username")
+    qbittorrent_password=$(effective_env_value "QBITTORRENT_PASSWORD" "$global_password")
+    existing_password_hash=$(get_qbit_config_value "$qbittorrent_config" 'WebUI\Password_PBKDF2')
 
-    rm -f "$qbittorrent_config".bak
+    set_qbit_config_value "$qbittorrent_config" 'WebUI\Username' "$qbittorrent_username"
+    set_qbit_config_value "$qbittorrent_config" 'WebUI\Password_PBKDF2' "\"$(qbit_password_hash "$qbittorrent_password" "$existing_password_hash")\""
     echo "Update of ${container} configuration complete, restarting..."
     docker compose start "$container"
 }

@@ -119,6 +119,34 @@ def resolve_env_values(values: dict[str, str]) -> dict[str, str]:
     return {key: expand(value) for key, value in values.items()}
 
 
+def apply_blank_aware_defaults(env: dict[str, str]) -> dict[str, str]:
+    env = dict(env)
+    admin_username = env.get("ADMIN_USERNAME") or "admin"
+    global_password = env.get("GLOBAL_PASSWORD") or "adminadmin"
+
+    for key in (
+        "QBITTORRENT_USERNAME",
+        "ADGUARD_USERNAME",
+        "CALIBRE_USERNAME",
+        "PAPERLESS_ADMIN_USER",
+        "SEERR_JELLYFIN_ADMIN_USERNAME",
+    ):
+        if not env.get(key):
+            env[key] = admin_username
+
+    for key in (
+        "QBITTORRENT_PASSWORD",
+        "ADGUARD_PASSWORD",
+        "CALIBRE_PASSWORD",
+        "PAPERLESS_ADMIN_PASSWORD",
+        "SEERR_JELLYFIN_ADMIN_PASSWORD",
+    ):
+        if not env.get(key):
+            env[key] = global_password
+
+    return env
+
+
 def env_bool(env: dict[str, str], key: str, default: bool) -> bool:
     value = env.get(key)
     if value is None or value == "":
@@ -1091,6 +1119,7 @@ def main() -> int:
     env = parse_env_file(ROOT_DIR / ".env.example")
     env.update(parse_env_file(ROOT_DIR / ".env"))
     env = resolve_env_values(env)
+    env = apply_blank_aware_defaults(env)
     running_services = compose_running_services()
 
     if not args.skip_qbittorrent:

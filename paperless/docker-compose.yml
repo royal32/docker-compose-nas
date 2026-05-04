@@ -4,20 +4,24 @@ services:
     container_name: paperless_webserver
     restart: always
     depends_on:
-      - paperless-broker
+      paperless-broker:
+        condition: service_started
+      stack-bootstrap:
+        condition: service_completed_successfully
     volumes:
       - paperless-data:/usr/src/paperless/data
       - paperless-media:/usr/src/paperless/media
       - ${CONFIG_ROOT:-.}/paperless/consume:/usr/src/paperless/consume
       - ${CONFIG_ROOT:-.}/paperless/export:/usr/src/paperless/export
     env_file:
-      - ${CONFIG_ROOT:-.}/paperless/.env
+      - path: ${CONFIG_ROOT:-.}/paperless/.env
+        required: false
     environment:
       PAPERLESS_REDIS: redis://paperless-broker:6379
       PAPERLESS_FORCE_SCRIPT_NAME: /paperless
       PAPERLESS_URL: https://${HOSTNAME}
-      PAPERLESS_ADMIN_USER: ${PAPERLESS_ADMIN_USER}
-      PAPERLESS_ADMIN_PASSWORD: ${PAPERLESS_ADMIN_PASSWORD}
+      PAPERLESS_ADMIN_USER: ${PAPERLESS_ADMIN_USER:-${ADMIN_USERNAME:-admin}}
+      PAPERLESS_ADMIN_PASSWORD: ${PAPERLESS_ADMIN_PASSWORD:-${GLOBAL_PASSWORD:-adminadmin}}
       USERMAP_UID: ${USER_ID}
       USERMAP_GID: ${GROUP_ID}
     labels:
@@ -48,7 +52,8 @@ services:
     container_name: paperless_backup
     image: mazzolino/restic:latest
     env_file:
-      - ${CONFIG_ROOT:-.}/paperless/backup.env
+      - path: ${CONFIG_ROOT:-.}/paperless/backup.env
+        required: false
     environment:
       RESTIC_BACKUP_SOURCES: /data
       RESTIC_BACKUP_ARGS: --tag paperless --exclude /data/media/.thumbnails
@@ -60,7 +65,10 @@ services:
       - /var/run/docker.sock:/var/run/docker.sock:ro
       - ${CONFIG_ROOT:-.}/paperless/.rclone:/root/.config/rclone:ro
     depends_on:
-      - paperless-webserver
+      paperless-webserver:
+        condition: service_started
+      stack-bootstrap:
+        condition: service_completed_successfully
     restart: always
     profiles:
       - paperless-backup

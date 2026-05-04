@@ -6,7 +6,11 @@ services:
     volumes:
       - ${CONFIG_ROOT:-.}/vaultwarden/vw-data:/data
     env_file:
-      - ${CONFIG_ROOT:-.}/vaultwarden/.env
+      - path: ${CONFIG_ROOT:-.}/vaultwarden/.env
+        required: false
+    depends_on:
+      stack-bootstrap:
+        condition: service_completed_successfully
     labels:
       - traefik.enable=true
       - traefik.http.routers.vaultwarden-ui.rule=(Host(`${HOSTNAME}`) && PathPrefix(`/vaultwarden`))
@@ -38,7 +42,11 @@ services:
     container_name: vaultwarden-backup
     restart: always
     env_file:
-      - ${CONFIG_ROOT:-.}/vaultwarden/backup.env
+      - path: ${CONFIG_ROOT:-.}/vaultwarden/backup.env
+        required: false
+    depends_on:
+      stack-bootstrap:
+        condition: service_completed_successfully
     environment:
       - BACKUP_FOLDER_NAME_1=attachments
       - BACKUP_FOLDER_PATH_1=/vw-data/attachments

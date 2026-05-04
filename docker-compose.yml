@@ -1,4 +1,48 @@
 services:
+  stack-bootstrap:
+    build:
+      context: .
+      dockerfile: setup/Dockerfile
+    container_name: stack-bootstrap
+    restart: "no"
+    command: ["/bin/bash", "/stack/compose-bootstrap.sh"]
+    volumes:
+      - .:/stack
+      - /var/run/docker.sock:/var/run/docker.sock
+
+  stack-setup:
+    build:
+      context: .
+      dockerfile: setup/Dockerfile
+    container_name: stack-setup
+    restart: "no"
+    environment:
+      - SETUP_WAIT_TIMEOUT=${SETUP_WAIT_TIMEOUT:-300}
+    volumes:
+      - .:/stack
+      - /var/run/docker.sock:/var/run/docker.sock
+    depends_on:
+      stack-bootstrap:
+        condition: service_completed_successfully
+      traefik:
+        condition: service_started
+      sonarr:
+        condition: service_started
+      radarr:
+        condition: service_started
+      bazarr:
+        condition: service_started
+      prowlarr:
+        condition: service_started
+      qbittorrent:
+        condition: service_started
+      vpn:
+        condition: service_started
+      jellyfin:
+        condition: service_started
+      homepage:
+        condition: service_started
+
   traefik:
     image: ghcr.io/traefik/traefik:3.6
     container_name: traefik
@@ -337,8 +381,8 @@ services:
       - homepage.weight=2
       - homepage.widget.type=qbittorrent
       - homepage.widget.url=http://vpn:8080
-      - homepage.widget.username=${QBITTORRENT_USERNAME}
-      - homepage.widget.password=${QBITTORRENT_PASSWORD}
+      - homepage.widget.username=${QBITTORRENT_USERNAME:-${ADMIN_USERNAME:-admin}}
+      - homepage.widget.password=${QBITTORRENT_PASSWORD:-${GLOBAL_PASSWORD:-adminadmin}}
   vpn:
     image: ghcr.io/thrnz/docker-wireguard-pia:latest
     container_name: vpn
@@ -352,8 +396,8 @@ services:
       - LOC=${PIA_LOCATION}
       - USER=${PIA_USER}
       - PASS=${PIA_PASS}
-      - QBT_USER=${QBITTORRENT_USERNAME}
-      - QBT_PASS=${QBITTORRENT_PASSWORD}
+      - QBT_USER=${QBITTORRENT_USERNAME:-${ADMIN_USERNAME:-admin}}
+      - QBT_PASS=${QBITTORRENT_PASSWORD:-${GLOBAL_PASSWORD:-adminadmin}}
       - LOCAL_NETWORK=${PIA_LOCAL_NETWORK}
       - PORT_FORWARDING=1
       - PORT_PERSIST=1
@@ -525,8 +569,8 @@ services:
       - homepage.weight=5
       - homepage.widget.type=calibreweb
       - homepage.widget.url=http://calibre-web:8083
-      - homepage.widget.username=${CALIBRE_USERNAME}
-      - homepage.widget.password=${CALIBRE_PASSWORD}
+      - homepage.widget.username=${CALIBRE_USERNAME:-${ADMIN_USERNAME:-admin}}
+      - homepage.widget.password=${CALIBRE_PASSWORD:-${GLOBAL_PASSWORD:-adminadmin}}
     profiles:
       - calibre-web
   homepage:

@@ -58,8 +58,8 @@ services:
       - homepage.weight=0
       - homepage.widget.type=adguard
       - homepage.widget.url=https://${ADGUARD_HOSTNAME}
-      - homepage.widget.username=${ADGUARD_USERNAME}
-      - homepage.widget.password=${ADGUARD_PASSWORD}
+      - homepage.widget.username=${ADGUARD_USERNAME:-${ADMIN_USERNAME:-admin}}
+      - homepage.widget.password=${ADGUARD_PASSWORD:-${GLOBAL_PASSWORD:-adminadmin}}
     profiles:
       - adguardhome
 

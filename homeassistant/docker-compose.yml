@@ -78,7 +78,11 @@ services:
     container_name: homeassistant-backup
     restart: always
     env_file:
-      - ${CONFIG_ROOT:-.}/homeassistant/backup.env
+      - path: ${CONFIG_ROOT:-.}/homeassistant/backup.env
+        required: false
+    depends_on:
+      stack-bootstrap:
+        condition: service_completed_successfully
     environment:
       - BACKUP_FOLDER_NAME=backups
       - BACKUP_FOLDER_PATH=/backups

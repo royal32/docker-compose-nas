@@ -4,7 +4,11 @@ services:
     container_name: tandoor
     restart: always
     env_file:
-      - ${CONFIG_ROOT:-.}/tandoor/.env
+      - path: ${CONFIG_ROOT:-.}/tandoor/.env
+        required: false
+    depends_on:
+      stack-bootstrap:
+        condition: service_completed_successfully
     volumes:
       - ${CONFIG_ROOT:-.}/tandoor/database:/opt/recipes/database
       - ${CONFIG_ROOT:-.}/tandoor/mediafiles:/opt/recipes/mediafiles
@@ -34,7 +38,11 @@ services:
     container_name: tandoor-backup
     restart: always
     env_file:
-      - ${CONFIG_ROOT:-.}/tandoor/backup.env
+      - path: ${CONFIG_ROOT:-.}/tandoor/backup.env
+        required: false
+    depends_on:
+      stack-bootstrap:
+        condition: service_completed_successfully
     environment:
       - BACKUP_FOLDER_NAME=mediafiles
       - BACKUP_FOLDER_PATH=/data/mediafiles

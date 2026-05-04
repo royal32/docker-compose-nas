@@ -98,13 +98,22 @@ see [Optional Services](#optional-services) for more information.
 
 ## Quick Start
 
-Run the automated bootstrap:
+Copy the example env, fill the small must-configure section at the top, then start Compose:
 
 ```shell
-./setup-stack.sh
+cp .env.example .env
+docker compose up -d
 ```
 
-This will create `.env` if needed, detect local `USER_ID`, `GROUP_ID`, and `TIMEZONE`, create missing per-service env files for enabled profiles, validate the compose configuration, start the stack, run `./update-config.sh`, automate the qBittorrent, Sonarr, Radarr, Prowlarr, and Seerr connections when those services are enabled, and wait for health checks.
+The Compose stack includes a `stack-setup` one-shot service. On `docker compose up`, it waits for the running services, runs `./update-config.sh`, then runs `./configure-app-connections.py`. These scripts are idempotent: they create/update the qBittorrent, Sonarr, Radarr, Prowlarr, and Seerr wiring to match `.env`.
+
+The only values most users need to fill are:
+
+- `DATA_ROOT`, `DOWNLOAD_ROOT`, and `IMMICH_UPLOAD_LOCATION` for host media paths.
+- `PIA_LOCATION`, `PIA_USER`, `PIA_PASS`, and usually `PIA_LOCAL_NETWORK` for Private Internet Access.
+- `GLOBAL_PASSWORD` if you want a password other than `adminadmin`.
+
+Every service username defaults to `admin`. Blank per-service password fields use `GLOBAL_PASSWORD`; fill a service-specific password only when it should differ.
 
 For a local `localhost` setup, leave `TRAEFIK_CERT_RESOLVER` empty to use Traefik's default certificate.
 Set `TRAEFIK_CERT_RESOLVER=myresolver` only when you have configured ACME and the required DNS provider credentials.
@@ -112,12 +121,11 @@ Set `TRAEFIK_CERT_RESOLVER=myresolver` only when you have configured ACME and th
 Common examples:
 
 ```shell
-./setup-stack.sh --profiles paperless,vaultwarden
-./setup-stack.sh --set DATA_ROOT=/srv/data --set DOWNLOAD_ROOT=/srv/data/torrents
-./setup-stack.sh --profiles tandoor,tandoor-backup
+COMPOSE_PROFILES=paperless,vaultwarden docker compose up -d
+COMPOSE_PROFILES=tandoor,tandoor-backup docker compose up -d
 ```
 
-If you prefer to run the steps manually, the equivalent baseline flow is `cp .env.example .env`, edit to your needs, then `docker compose up -d` and `./update-config.sh`.
+`./setup-stack.sh` is still available when you want the older wrapper behavior, such as creating `.env`, detecting `USER_ID`, `GROUP_ID`, and `TIMEZONE`, or passing `--set KEY=VALUE`.
 
 If you want to show Jellyfin information in the homepage, create it in Jellyfin settings and fill `JELLYFIN_API_KEY`.
 
@@ -125,26 +133,25 @@ If you want to show Jellyfin information in the homepage, create it in Jellyfin 
 
 | Variable                       | Description                                                                                                                                                                                            | Default                                          |
 | ------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | ------------------------------------------------ |
-| `COMPOSE_FILE`                 | Docker compose files to load                                                                                                                                                                           |                                                  |
-| `COMPOSE_PROFILES`             | Docker compose profiles to load (`flaresolverr`, `adguardhome`, `sabnzbd`, `tandoor-backup`, `vaultwarden-backup`, etc.)                                                                              |                                                  |
-| `USER_ID`                      | ID of the user to use in Docker containers                                                                                                                                                             | `1000`                                           |
-| `GROUP_ID`                     | ID of the user group to use in Docker containers                                                                                                                                                       | `1000`                                           |
-| `TIMEZONE`                     | TimeZone used by the container.                                                                                                                                                                        | `America/New_York`                               |
-| `CONFIG_ROOT`                  | Host location for configuration files                                                                                                                                                                  | `.`                                              |
 | `DATA_ROOT`                    | Host location of the data files                                                                                                                                                                        | `/mnt/data`                                      |
 | `DOWNLOAD_ROOT`                | Host download location for qBittorrent, should be a subfolder of `DATA_ROOT`                                                                                                                           | `/mnt/data/torrents`                             |
+| `IMMICH_UPLOAD_LOCATION`       | Host location for Immich uploads, if Immich is enabled                                                                                                                                                 | `/mnt/data/photos`                               |
 | `PIA_LOCATION`                 | Servers to use for PIA. [see list here](https://serverlist.piaservers.net/vpninfo/servers/v6)                                                                                                          | `ca` (Montreal, Canada)                          |
 | `PIA_USER`                     | PIA username                                                                                                                                                                                           |                                                  |
 | `PIA_PASS`                     | PIA password                                                                                                                                                                                           |                                                  |
 | `PIA_LOCAL_NETWORK`            | PIA local network                                                                                                                                                                                      | `192.168.0.0/16`                                 |
+| `ADMIN_USERNAME`               | Default username used when a service-specific username is blank                                                                                                                                        | `admin`                                          |
+| `GLOBAL_PASSWORD`              | Default password used when a service-specific password is blank                                                                                                                                        | `adminadmin`                                     |
+| `COMPOSE_PROFILES`             | Docker compose profiles to load (`flaresolverr`, `adguardhome`, `sabnzbd`, `tandoor-backup`, `vaultwarden-backup`, etc.)                                                                              |                                                  |
+| `TIMEZONE`                     | TimeZone used by the container.                                                                                                                                                                        | `America/New_York`                               |
 | `HOSTNAME`                     | Hostname of the NAS, could be a local IP or a domain name                                                                                                                                              | `localhost`                                      |
 | `BASE_HOSTNAME`                | Base hostname of the NAS, useful if hostname is a subdomain                                                                                                                                            | `localhost`                                      |
 | `TRAEFIK_CERT_RESOLVER`        | Traefik certificate resolver to use for ACME certificates. Leave empty for local setups such as `localhost`, set to `myresolver` when DNS challenge credentials are configured.                     |                                                  |
 | `ADGUARD_HOSTNAME`             | Optional - AdGuard Home hostname used, if enabled                                                                                                                                                      |                                                  |
-| `ADGUARD_USERNAME`             | Optional - AdGuard Home username to show details in the homepage, if enabled                                                                                                                           |                                                  |
-| `ADGUARD_PASSWORD`             | Optional - AdGuard Home password to show details in the homepage, if enabled                                                                                                                           |                                                  |
-| `QBITTORRENT_USERNAME`         | qBittorrent username to access the web UI                                                                                                                                                              | `admin`                                          |
-| `QBITTORRENT_PASSWORD`         | qBittorrent password to access the web UI                                                                                                                                                              | `adminadmin`                                     |
+| `ADGUARD_USERNAME`             | Optional - AdGuard Home username override                                                                                                                                                              |                                                  |
+| `ADGUARD_PASSWORD`             | Optional - AdGuard Home password override                                                                                                                                                              |                                                  |
+| `QBITTORRENT_USERNAME`         | Optional qBittorrent username override                                                                                                                                                                 |                                                  |
+| `QBITTORRENT_PASSWORD`         | Optional qBittorrent password override                                                                                                                                                                 |                                                  |
 | `QBITTORRENT_SAVE_PATH`        | Default qBittorrent download path inside the container                                                                                                                                                  | `/data/torrents`                                 |
 | `QBITTORRENT_TEMP_PATH`        | qBittorrent temporary download path inside the container                                                                                                                                                | `/data/torrents/incomplete`                      |
 | `SONARR_ROOT_FOLDER`           | Sonarr root folder created and configured automatically                                                                                                                                                 | `/data/media/tv`                                 |
@@ -241,7 +248,7 @@ In Lidarr, set the Root folder to `/data/media/music`.
 
 ### Download Client
 
-`./setup-stack.sh` now configures qBittorrent automatically for Sonarr and Radarr by default.
+`docker compose up` now configures qBittorrent automatically for Sonarr and Radarr by default through the `stack-setup` service.
 It creates the root folders, creates qBittorrent categories, points the download client at `vpn:8080`, and sets qBittorrent's internal save paths.
 
 If you want to run just the integration step again, use:
@@ -256,7 +263,7 @@ Because all the networking for qBittorrent takes place in the VPN container, the
 
 The indexers are configured through Prowlarr. They synchronize automatically to Radarr and Sonarr.
 
-`./setup-stack.sh` now adds the Prowlarr application links for Sonarr, Radarr, and Lidarr automatically when those services are running.
+`docker compose up` now adds the Prowlarr application links for Sonarr, Radarr, and Lidarr automatically when those services are running.
 
 The Prowlarr server is `http://prowlarr:9696/prowlarr`, the Radarr server is `http://radarr:7878/radarr`, the Sonarr server is `http://sonarr:8989/sonarr`, and the Lidarr server is `http://lidarr:8686/lidarr`.
 
@@ -264,7 +271,7 @@ Their API keys can be found in Settings > Security > API Key.
 
 ## qBittorrent
 
-Running `update-config.sh` will set qBittorrent's password to `adminadmin`. If you wish to update the password manually,
+Running `update-config.sh` will set qBittorrent's username to `QBITTORRENT_USERNAME` or `ADMIN_USERNAME`, and its password to `QBITTORRENT_PASSWORD` or `GLOBAL_PASSWORD`. If you wish to update the password manually,
 since qBittorrent v4.6.2, a temporary password is generated on startup. Get it with `docker compose logs qbittorrent`:
 
 ```

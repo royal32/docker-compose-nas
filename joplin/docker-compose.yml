@@ -5,7 +5,11 @@ services:
     container_name: joplin
     restart: always
     env_file:
-      - ${CONFIG_ROOT:-.}/joplin/.env
+      - path: ${CONFIG_ROOT:-.}/joplin/.env
+        required: false
+    depends_on:
+      stack-bootstrap:
+        condition: service_completed_successfully
     environment:
       - APP_PORT=22300
       - APP_BASE_URL=https://${HOSTNAME}/joplin
@@ -45,7 +49,11 @@ services:
     container_name: joplin-backup
     restart: always
     env_file:
-      - ${CONFIG_ROOT:-.}/joplin/backup.env
+      - path: ${CONFIG_ROOT:-.}/joplin/backup.env
+        required: false
+    depends_on:
+      stack-bootstrap:
+        condition: service_completed_successfully
     environment:
       - BACKUP_FOLDER_NAME=storage
       - BACKUP_FOLDER_PATH=/storage

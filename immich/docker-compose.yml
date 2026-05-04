@@ -13,8 +13,12 @@ services:
       - /etc/localtime:/etc/localtime:ro
       - ${CONFIG_ROOT:-.}/immich/healthcheck:/healthcheck
     depends_on:
-      - immich-redis
-      - immich-database
+      immich-redis:
+        condition: service_started
+      immich-database:
+        condition: service_started
+      stack-bootstrap:
+        condition: service_completed_successfully
     restart: always
     labels:
       - traefik.enable=true
@@ -72,7 +76,8 @@ services:
     container_name: immich_backup
     image: mazzolino/restic:latest
     env_file:
-      - ${CONFIG_ROOT:-.}/immich/backup.env
+      - path: ${CONFIG_ROOT:-.}/immich/backup.env
+        required: false
     environment:
       RESTIC_BACKUP_SOURCES: /data
       RESTIC_BACKUP_ARGS: --tag immich --exclude /data/thumbs --exclude /data/encoded-video --exclude /data/backups
@@ -84,8 +89,12 @@ services:
       - /var/run/docker.sock:/var/run/docker.sock:ro
       - ${CONFIG_ROOT:-.}/immich/.rclone:/root/.config/rclone:ro
     depends_on:
-      - immich-server
-      - immich-database
+      immich-server:
+        condition: service_started
+      immich-database:
+        condition: service_started
+      stack-bootstrap:
+        condition: service_completed_successfully
     restart: always
     profiles:
       - immich-backup

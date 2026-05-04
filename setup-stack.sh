@@ -430,7 +430,7 @@ validate_compose
 
 if (( SKIP_UP == 0 )); then
   log "Starting compose stack"
-  (cd "$ROOT_DIR" && docker compose up -d)
+  (cd "$ROOT_DIR" && docker compose up -d --scale stack-setup=0)
 fi
 
 if (( SKIP_BOOTSTRAP == 0 )); then
