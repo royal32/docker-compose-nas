@@ -29,7 +29,7 @@ services:
       retries: 10
     labels:
       - traefik.enable=true
-      - traefik.http.routers.joplin.rule=(Host(`${HOSTNAME}`) && PathPrefix(`/joplin`))
+      - traefik.http.routers.joplin.rule=PathPrefix(`/joplin`)
       - traefik.http.routers.joplin.tls=true
       - traefik.http.routers.joplin.tls.certresolver=${TRAEFIK_CERT_RESOLVER:-}
       - traefik.http.routers.joplin.middlewares=joplin-stripprefix

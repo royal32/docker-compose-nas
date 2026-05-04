@@ -26,7 +26,7 @@ services:
       USERMAP_GID: ${GROUP_ID}
     labels:
       - traefik.enable=true
-      - traefik.http.routers.paperless.rule=(Host(`${HOSTNAME}`) && PathPrefix(`/paperless`))
+      - traefik.http.routers.paperless.rule=PathPrefix(`/paperless`)
       - traefik.http.routers.paperless.tls=true
       - traefik.http.routers.paperless.tls.certresolver=${TRAEFIK_CERT_RESOLVER:-}
       - traefik.http.services.paperless.loadbalancer.server.port=8000

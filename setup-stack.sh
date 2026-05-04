@@ -174,6 +174,29 @@ detect_timezone() {
   printf '%s' "$timezone"
 }
 
+detect_local_hostname() {
+  local detected=""
+
+  if command -v scutil >/dev/null 2>&1; then
+    detected=$(scutil --get LocalHostName 2>/dev/null || true)
+  fi
+
+  if [[ -z "$detected" ]]; then
+    detected=$(hostname -s 2>/dev/null || hostname 2>/dev/null || true)
+  fi
+
+  detected="${detected%%.*}"
+  detected=$(printf '%s' "$detected" | tr '[:upper:]' '[:lower:]' | sed 's/[^a-z0-9-]//g')
+
+  if [[ -z "$detected" ]]; then
+    detected="localhost"
+  elif [[ "$detected" != "localhost" ]]; then
+    detected="${detected}.local"
+  fi
+
+  printf '%s' "$detected"
+}
+
 profile_enabled() {
   local target="$1"
   local profiles_csv="$2"
@@ -183,7 +206,7 @@ profile_enabled() {
 
 ensure_commands() {
   local command_name
-  for command_name in docker awk sed cp chmod mktemp id python3 curl; do
+  for command_name in docker awk sed cp chmod mktemp id python3 curl openssl; do
     command -v "$command_name" >/dev/null 2>&1 || die "Missing required command: $command_name"
   done
 
@@ -191,14 +214,19 @@ ensure_commands() {
 }
 
 ensure_root_env() {
+  local local_hostname
+
   if [[ ! -f "$ENV_FILE" ]]; then
     cp "$ENV_TEMPLATE" "$ENV_FILE"
     log "Created .env from .env.example"
   fi
 
+  local_hostname=$(detect_local_hostname)
   set_if_missing_or_default "$ENV_FILE" "USER_ID" "1000" "$(id -u)"
   set_if_missing_or_default "$ENV_FILE" "GROUP_ID" "1000" "$(id -g)"
   set_if_missing_or_default "$ENV_FILE" "TIMEZONE" "America/New_York" "$(detect_timezone)"
+  set_if_missing_or_default "$ENV_FILE" "HOSTNAME" "localhost" "$local_hostname"
+  set_if_missing_or_default "$ENV_FILE" "BASE_HOSTNAME" "localhost" "$local_hostname"
 }
 
 apply_root_overrides() {
@@ -226,6 +254,77 @@ ensure_acme_storage() {
   mkdir -p "$ROOT_DIR/letsencrypt"
   touch "$ROOT_DIR/letsencrypt/acme.json"
   chmod 600 "$ROOT_DIR/letsencrypt/acme.json"
+}
+
+ensure_local_tls_certificate() {
+  local cert_dir="$ROOT_DIR/traefik/certs"
+  local dynamic_dir="$ROOT_DIR/traefik/dynamic"
+  local cert_file="$cert_dir/local.crt"
+  local key_file="$cert_dir/local.key"
+  local config_file="$cert_dir/local-openssl.cnf"
+  local dynamic_file="$dynamic_dir/local-tls.yml"
+  local host_name
+  local extra_hosts
+  local san_entries
+  local index
+  local host
+  local extra_hosts_array=()
+
+  host_name=$(get_env_value "$ENV_FILE" "HOSTNAME" || true)
+  extra_hosts=$(get_env_value "$ENV_FILE" "LOCAL_TLS_HOSTS" || true)
+
+  mkdir -p "$cert_dir" "$dynamic_dir"
+
+  san_entries=("DNS.1 = localhost" "DNS.2 = *.local")
+  index=3
+
+  if [[ -n "$host_name" && "$host_name" != "localhost" ]]; then
+    san_entries+=("DNS.${index} = ${host_name}")
+    index=$((index + 1))
+  fi
+
+  if [[ -n "$extra_hosts" ]]; then
+    IFS=',' read -r -a extra_hosts_array <<< "$extra_hosts"
+    for host in "${extra_hosts_array[@]}"; do
+      host=$(printf '%s' "$host" | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')
+      [[ -n "$host" ]] || continue
+      san_entries+=("DNS.${index} = ${host}")
+      index=$((index + 1))
+    done
+  fi
+
+  {
+    printf '[req]\n'
+    printf 'distinguished_name = req_distinguished_name\n'
+    printf 'x509_extensions = v3_req\n'
+    printf 'prompt = no\n\n'
+    printf '[req_distinguished_name]\n'
+    printf 'CN = %s\n\n' "${host_name:-localhost}"
+    printf '[v3_req]\n'
+    printf 'keyUsage = keyEncipherment, dataEncipherment\n'
+    printf 'extendedKeyUsage = serverAuth\n'
+    printf 'subjectAltName = @alt_names\n\n'
+    printf '[alt_names]\n'
+    printf '%s\n' "${san_entries[@]}"
+  } > "$config_file"
+
+  if [[ ! -f "$cert_file" || ! -f "$key_file" ]] || ! openssl x509 -checkend 2592000 -noout -in "$cert_file" >/dev/null 2>&1; then
+    openssl req -x509 -nodes -days 825 -newkey rsa:2048 \
+      -keyout "$key_file" \
+      -out "$cert_file" \
+      -config "$config_file" >/dev/null 2>&1
+    chmod 600 "$key_file"
+    log "Generated local Traefik TLS certificate for ${host_name:-localhost}"
+  fi
+
+  cat > "$dynamic_file" <<EOF
+tls:
+  stores:
+    default:
+      defaultCertificate:
+        certFile: /traefik-certs/local.crt
+        keyFile: /traefik-certs/local.key
+EOF
 }
 
 provision_service_envs() {
@@ -422,6 +521,7 @@ ensure_commands
 ensure_root_env
 apply_root_overrides
 ensure_acme_storage
+ensure_local_tls_certificate
 
 ACTIVE_PROFILES=$(get_env_value "$ENV_FILE" "COMPOSE_PROFILES" || true)
 TIMEZONE_VALUE=$(get_env_value "$ENV_FILE" "TIMEZONE" || printf 'America/New_York')

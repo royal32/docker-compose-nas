@@ -116,7 +116,8 @@ The only values most users need to fill are:
 
 Every service username defaults to `admin`. Blank per-service password fields use `GLOBAL_PASSWORD`; fill a service-specific password only when it should differ.
 
-For a local `localhost` setup, leave `TRAEFIK_CERT_RESOLVER` empty to use Traefik's default certificate.
+For local access, leave `TRAEFIK_CERT_RESOLVER` empty. `docker compose up` generates a local Traefik certificate for `localhost`, the detected host `.local` name, and `*.local`.
+Public certificate authorities do not issue browser-trusted certificates for `.local` names; use a real domain with ACME if remote clients must see a fully trusted HTTPS certificate without trusting a local CA.
 Set `TRAEFIK_CERT_RESOLVER=myresolver` only when you have configured ACME and the required DNS provider credentials.
 
 Common examples:
@@ -148,6 +149,8 @@ The setup automation completes Jellyfin's startup wizard when Jellyfin has no us
 | `HOSTNAME`                     | Hostname of the NAS, could be a local IP or a domain name                                                                                                                                              | `localhost`                                      |
 | `BASE_HOSTNAME`                | Base hostname of the NAS, useful if hostname is a subdomain                                                                                                                                            | `localhost`                                      |
 | `TRAEFIK_CERT_RESOLVER`        | Traefik certificate resolver to use for ACME certificates. Leave empty for local setups such as `localhost`, set to `myresolver` when DNS challenge credentials are configured.                     |                                                  |
+| `LOCAL_TLS_HOSTS`              | Optional comma-separated extra hostnames to include in the generated local Traefik certificate.                                                                                                        |                                                  |
+| `MDNS_ADVERTISE_IP`            | Optional LAN IP for the `.local` mDNS advertisement. Leave blank to auto-detect from the host network.                                                                                                |                                                  |
 | `ADGUARD_HOSTNAME`             | Optional - AdGuard Home hostname used, if enabled                                                                                                                                                      |                                                  |
 | `ADGUARD_USERNAME`             | Optional - AdGuard Home username override                                                                                                                                                              |                                                  |
 | `ADGUARD_PASSWORD`             | Optional - AdGuard Home password override                                                                                                                                                              |                                                  |

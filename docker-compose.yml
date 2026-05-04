@@ -1,3 +1,5 @@
+name: docker-compose-nas
+
 services:
   stack-bootstrap:
     build:
@@ -45,6 +47,21 @@ services:
       homepage:
         condition: service_started
 
+  mdns-publisher:
+    build:
+      context: .
+      dockerfile: setup/Dockerfile
+    container_name: mdns-publisher
+    restart: unless-stopped
+    network_mode: host
+    environment:
+      - LOCAL_MDNS_HOSTNAME=${HOSTNAME}
+      - MDNS_ADVERTISE_IP=${MDNS_ADVERTISE_IP:-}
+    volumes:
+      - .:/stack:ro
+      - /etc/hostname:/host/etc/hostname:ro
+    command: ["/bin/bash", "/stack/publish-mdns.sh"]
+
   traefik:
     image: ghcr.io/traefik/traefik:3.6
     container_name: traefik
@@ -69,11 +86,15 @@ services:
       - --certificatesresolvers.myresolver.acme.caserver=${LETS_ENCRYPT_CA_SERVER:-https://acme-v02.api.letsencrypt.org/directory}
       - --certificatesresolvers.myresolver.acme.email=${LETS_ENCRYPT_EMAIL}
       - --certificatesresolvers.myresolver.acme.storage=/letsencrypt/acme.json
+      - --providers.file.directory=/traefik-dynamic
+      - --providers.file.watch=true
     ports:
       - "80:80"
       - "443:443"
     volumes:
       - ${CONFIG_ROOT:-.}/letsencrypt:/letsencrypt
+      - ${CONFIG_ROOT:-.}/traefik/dynamic:/traefik-dynamic:ro
+      - ${CONFIG_ROOT:-.}/traefik/certs:/traefik-certs:ro
       - "/var/run/docker.sock:/var/run/docker.sock:ro"
     extra_hosts:
       - host.docker.internal:172.17.0.1
@@ -98,7 +119,7 @@ services:
       retries: 10
     labels:
       - traefik.enable=true
-      - traefik.http.routers.sonarr.rule=(Host(`${HOSTNAME}`) && PathPrefix(`/sonarr`))
+      - traefik.http.routers.sonarr.rule=PathPrefix(`/sonarr`)
       - traefik.http.routers.sonarr.tls=true
       - traefik.http.routers.sonarr.tls.certresolver=${TRAEFIK_CERT_RESOLVER:-}
       - traefik.http.services.sonarr.loadbalancer.server.port=8989
@@ -128,7 +149,7 @@ services:
       retries: 10
     labels:
       - traefik.enable=true
-      - traefik.http.routers.radarr.rule=(Host(`${HOSTNAME}`) && PathPrefix(`/radarr`))
+      - traefik.http.routers.radarr.rule=PathPrefix(`/radarr`)
       - traefik.http.routers.radarr.tls=true
       - traefik.http.routers.radarr.tls.certresolver=${TRAEFIK_CERT_RESOLVER:-}
       - traefik.http.services.radarr.loadbalancer.server.port=7878
@@ -158,7 +179,7 @@ services:
       retries: 10
     labels:
       - traefik.enable=true
-      - traefik.http.routers.lidarr.rule=(Host(`${HOSTNAME}`) && PathPrefix(`/lidarr`))
+      - traefik.http.routers.lidarr.rule=PathPrefix(`/lidarr`)
       - traefik.http.routers.lidarr.tls=true
       - traefik.http.routers.lidarr.tls.certresolver=${TRAEFIK_CERT_RESOLVER:-}
       - traefik.http.services.lidarr.loadbalancer.server.port=8686
@@ -190,7 +211,7 @@ services:
       retries: 10
     labels:
       - traefik.enable=true
-      - traefik.http.routers.bazarr.rule=(Host(`${HOSTNAME}`) && PathPrefix(`/bazarr`))
+      - traefik.http.routers.bazarr.rule=PathPrefix(`/bazarr`)
       - traefik.http.routers.bazarr.tls=true
       - traefik.http.routers.bazarr.tls.certresolver=${TRAEFIK_CERT_RESOLVER:-}
       - traefik.http.services.bazarr.loadbalancer.server.port=6767
@@ -250,7 +271,7 @@ services:
       retries: 10
     labels:
       - traefik.enable=true
-      - traefik.http.routers.prowlarr.rule=(Host(`${HOSTNAME}`) && PathPrefix(`/prowlarr`))
+      - traefik.http.routers.prowlarr.rule=PathPrefix(`/prowlarr`)
       - traefik.http.routers.prowlarr.tls=true
       - traefik.http.routers.prowlarr.tls.certresolver=${TRAEFIK_CERT_RESOLVER:-}
       - traefik.http.services.prowlarr.loadbalancer.server.port=9696
@@ -273,7 +294,7 @@ services:
     restart: always
     labels:
     - traefik.enable=true
-    - traefik.http.routers.suggestarr.rule=(Host(`${HOSTNAME}`) && PathPrefix(`/suggestarr`))
+    - traefik.http.routers.suggestarr.rule=PathPrefix(`/suggestarr`)
     - traefik.http.routers.suggestarr.tls=true
     - traefik.http.routers.suggestarr.tls.certresolver=${TRAEFIK_CERT_RESOLVER:-}
     - traefik.http.services.suggestarr.loadbalancer.server.port=5000
@@ -319,7 +340,7 @@ services:
       - traefik.enable=true
       - traefik.http.middlewares.autobrr-strip.stripprefix.prefixes=/autobrr
       - traefik.http.middlewares.autobrr-strip.stripprefix.forceSlash=true
-      - traefik.http.routers.autobrr.rule=(Host(`${HOSTNAME}`) && PathPrefix(`/autobrr`))
+      - traefik.http.routers.autobrr.rule=PathPrefix(`/autobrr`)
       - traefik.http.routers.autobrr.tls=true
       - traefik.http.routers.autobrr.tls.certresolver=${TRAEFIK_CERT_RESOLVER:-}
       - traefik.http.services.autobrr.loadbalancer.server.port=7474
@@ -361,7 +382,7 @@ services:
         condition: service_healthy
     labels:
       - traefik.enable=true
-      - traefik.http.routers.qbittorrent.rule=(Host(`${HOSTNAME}`) && PathPrefix(`/qbittorrent`))
+      - traefik.http.routers.qbittorrent.rule=PathPrefix(`/qbittorrent`)
       - traefik.http.routers.qbittorrent.tls=true
       - traefik.http.routers.qbittorrent.tls.certresolver=${TRAEFIK_CERT_RESOLVER:-}
       - traefik.http.services.qbittorrent.loadbalancer.server.port=8080
@@ -466,7 +487,7 @@ services:
       - BASE_PATH=/cleanuparr
     labels:
       - traefik.enable=true
-      - traefik.http.routers.cleanuparr.rule=(Host(`${HOSTNAME}`) && PathPrefix(`/cleanuparr`))
+      - traefik.http.routers.cleanuparr.rule=PathPrefix(`/cleanuparr`)
       - traefik.http.routers.cleanuparr.tls=true
       - traefik.http.routers.cleanuparr.tls.certresolver=${TRAEFIK_CERT_RESOLVER:-}
       - traefik.http.services.cleanuparr.loadbalancer.server.port=11011
@@ -491,7 +512,7 @@ services:
     restart: always
     labels:
       - traefik.enable=true
-      - traefik.http.routers.sabnzbd.rule=(Host(`${HOSTNAME}`) && PathPrefix(`/sabnzbd`) || PathPrefix(`/sabnzbd`))
+      - traefik.http.routers.sabnzbd.rule=PathPrefix(`/sabnzbd`)
       - traefik.http.routers.sabnzbd.tls=true
       - traefik.http.routers.sabnzbd.tls.certresolver=${TRAEFIK_CERT_RESOLVER:-}
       - traefik.http.services.sabnzbd.loadbalancer.server.port=8080
@@ -528,7 +549,7 @@ services:
       retries: 10
     labels:
       - traefik.enable=true
-      - traefik.http.routers.jellyfin.rule=(Host(`${HOSTNAME}`) && PathPrefix(`/jellyfin`))
+      - traefik.http.routers.jellyfin.rule=PathPrefix(`/jellyfin`)
       - traefik.http.routers.jellyfin.tls=true
       - traefik.http.routers.jellyfin.tls.certresolver=${TRAEFIK_CERT_RESOLVER:-}
       - traefik.http.services.jellyfin.loadbalancer.server.port=8096
@@ -560,7 +581,7 @@ services:
       - traefik.http.middlewares.calibre-headers.headers.customRequestHeaders.X-Script-Name=/calibre
       - traefik.http.middlewares.calibre-stripprefixregex.stripPrefixRegex.regex=/calibre
       - traefik.http.routers.calibre.middlewares=calibre-headers,calibre-stripprefixregex
-      - traefik.http.routers.calibre.rule=(Host(`${HOSTNAME}`) && PathPrefix(`/calibre`))
+      - traefik.http.routers.calibre.rule=PathPrefix(`/calibre`)
       - traefik.http.routers.calibre.tls=true
       - traefik.http.routers.calibre.tls.certresolver=${TRAEFIK_CERT_RESOLVER:-}
       - traefik.http.services.calibre.loadbalancer.server.port=8083
@@ -600,7 +621,7 @@ services:
       [sh, -c, "cp -n /app/config/tpl/*.yaml /app/config && node server.js"]
     labels:
       - traefik.enable=true
-      - traefik.http.routers.homepage.rule=(Host(`${HOSTNAME}`) && PathPrefix(`/`))
+      - traefik.http.routers.homepage.rule=PathPrefix(`/`)
       - traefik.http.routers.homepage.tls=true
       - traefik.http.routers.homepage.tls.certresolver=${TRAEFIK_CERT_RESOLVER:-}
       - traefik.http.services.homepage.loadbalancer.server.port=3000
