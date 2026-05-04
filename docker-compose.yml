@@ -7,7 +7,7 @@ services:
       dockerfile: setup/Dockerfile
     container_name: stack-bootstrap
     restart: "no"
-    command: ["/bin/bash", "/stack/compose-bootstrap.sh"]
+    command: ["/bin/bash", "/stack/scripts/compose-bootstrap.sh"]
     volumes:
       - .:/stack
       - /var/run/docker.sock:/var/run/docker.sock
@@ -60,7 +60,7 @@ services:
     volumes:
       - .:/stack:ro
       - /etc/hostname:/host/etc/hostname:ro
-    command: ["/bin/bash", "/stack/publish-mdns.sh"]
+    command: ["/bin/bash", "/stack/scripts/publish-mdns.sh"]
 
   traefik:
     image: ghcr.io/traefik/traefik:3.6

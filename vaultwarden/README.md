@@ -6,7 +6,7 @@
 
 Enable Vaultwarden by setting `COMPOSE_PROFILES=vaultwarden`. It will be accessible at `/vaultwarden`.
 
-`./setup-stack.sh --profiles vaultwarden` will create `vaultwarden/.env` automatically. If you prefer to do it manually, copy `vaultwarden/.env.example` to `vaultwarden/.env` and edit as needed.
+`./scripts/setup-stack.sh --profiles vaultwarden` will create `vaultwarden/.env` automatically. If you prefer to do it manually, copy `vaultwarden/.env.example` to `vaultwarden/.env` and edit as needed.
 
 ## Backup
 

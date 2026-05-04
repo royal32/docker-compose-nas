@@ -6,7 +6,7 @@ Document management system for organizing, indexing, and searching your document
 
 Enable Paperless by setting `COMPOSE_PROFILES=paperless`.
 
-`./setup-stack.sh --profiles paperless` will create `paperless/.env` automatically.
+`./scripts/setup-stack.sh --profiles paperless` will create `paperless/.env` automatically.
 
 Paperless will be accessible at `/paperless`.
 

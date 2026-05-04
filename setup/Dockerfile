@@ -4,4 +4,4 @@ RUN apk add --no-cache avahi avahi-tools bash curl dbus docker-cli docker-cli-co
 
 WORKDIR /stack
 
-CMD ["/bin/bash", "/stack/compose-setup.sh"]
+CMD ["/bin/bash", "/stack/scripts/compose-setup.sh"]

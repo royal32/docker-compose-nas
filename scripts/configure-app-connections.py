@@ -20,7 +20,7 @@ from typing import Any
 from urllib import error, parse, request
 
 
-ROOT_DIR = Path(__file__).resolve().parent
+ROOT_DIR = Path(__file__).resolve().parent.parent
 SSL_CONTEXT = ssl._create_unverified_context()
 ENV_VAR_PATTERN = re.compile(r"\$\{([^}:]+)(:-([^}]*))?\}")
 SEERR_MEDIA_SERVER_TYPE_JELLYFIN = 2

@@ -6,7 +6,7 @@ Open source home automation that puts local control and privacy first. Powered b
 
 Enable Home Assistant by setting `COMPOSE_PROFILES=homeassistant`.
 
-The automated path is `./setup-stack.sh --profiles homeassistant`.
+The automated path is `./scripts/setup-stack.sh --profiles homeassistant`.
 
 Set the `HOMEASSISTANT_HOSTNAME`, since it does not support
 [running in a subfolder](https://github.com/home-assistant/architecture/issues/156).

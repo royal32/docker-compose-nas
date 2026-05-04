@@ -8,7 +8,7 @@ This service lets you host your own Joplin server, which your clients can connec
 
 Enable Joplin by setting `COMPOSE_PROFILES=joplin`. It will be accessible at `/joplin`.
 
-`./setup-stack.sh --profiles joplin` will create `joplin/.env` automatically. If you prefer to do it manually, copy `joplin/.env.example` to `joplin/.env` and edit as needed.
+`./scripts/setup-stack.sh --profiles joplin` will create `joplin/.env` automatically. If you prefer to do it manually, copy `joplin/.env.example` to `joplin/.env` and edit as needed.
 
 ## Backup
 

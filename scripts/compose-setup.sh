@@ -2,7 +2,8 @@
 
 set -euo pipefail
 
-ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+ROOT_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
 WAIT_TIMEOUT="${SETUP_WAIT_TIMEOUT:-300}"
 
 log() {
@@ -63,9 +64,9 @@ cd "$ROOT_DIR"
 wait_for_stack
 
 log "Running first-run post-start configuration"
-./update-config.sh
+./scripts/update-config.sh
 
 log "Automating app-to-app connections"
-python3 ./configure-app-connections.py
+python3 ./scripts/configure-app-connections.py
 
 log "Setup complete"

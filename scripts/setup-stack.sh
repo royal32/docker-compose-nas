@@ -2,7 +2,8 @@
 
 set -euo pipefail
 
-ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+ROOT_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
 ENV_FILE="$ROOT_DIR/.env"
 ENV_TEMPLATE="$ROOT_DIR/.env.example"
 WAIT_TIMEOUT=300
@@ -15,7 +16,7 @@ SET_OVERRIDES=()
 
 usage() {
   cat <<'EOF'
-Usage: ./setup-stack.sh [options]
+Usage: ./scripts/setup-stack.sh [options]
 
 Bootstrap the local Docker Compose NAS stack by creating missing env files,
 filling safe local defaults, validating the compose config, starting the stack,
@@ -26,16 +27,16 @@ Options:
   --set KEY=VALUE         Override a root .env variable, can be used multiple times
   --wait-timeout <secs>   Health wait timeout in seconds (default: 300)
   --no-up                 Skip docker compose up -d
-  --no-bootstrap          Skip ./update-config.sh
+  --no-bootstrap          Skip ./scripts/update-config.sh
   --no-connections        Skip automated app-to-app connection setup
   --no-wait               Skip waiting for container health
   --help                  Show this help
 
 Examples:
-  ./setup-stack.sh
-  ./setup-stack.sh --profiles paperless,vaultwarden
-  ./setup-stack.sh --set DATA_ROOT=/srv/data --set DOWNLOAD_ROOT=/srv/data/torrents
-  ./setup-stack.sh --profiles immich,immich-backup --set IMMICH_HOSTNAME=photos.example.com
+  ./scripts/setup-stack.sh
+  ./scripts/setup-stack.sh --profiles paperless,vaultwarden
+  ./scripts/setup-stack.sh --set DATA_ROOT=/srv/data --set DOWNLOAD_ROOT=/srv/data/torrents
+  ./scripts/setup-stack.sh --profiles immich,immich-backup --set IMMICH_HOSTNAME=photos.example.com
 EOF
 }
 
@@ -535,12 +536,12 @@ fi
 
 if (( SKIP_BOOTSTRAP == 0 )); then
   log "Running first-run post-start configuration"
-  (cd "$ROOT_DIR" && ./update-config.sh)
+  (cd "$ROOT_DIR" && ./scripts/update-config.sh)
 fi
 
 if (( SKIP_CONNECTIONS == 0 )); then
   log "Automating app-to-app connections"
-  (cd "$ROOT_DIR" && python3 ./configure-app-connections.py)
+  (cd "$ROOT_DIR" && python3 ./scripts/configure-app-connections.py)
 fi
 
 if (( SKIP_WAIT == 0 )); then

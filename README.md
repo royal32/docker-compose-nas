@@ -105,7 +105,7 @@ cp .env.example .env
 docker compose up -d
 ```
 
-The Compose stack includes a `stack-setup` one-shot service. On `docker compose up`, it waits for the running services, runs `./update-config.sh`, then runs `./configure-app-connections.py`. These scripts are idempotent: they create/update the qBittorrent, Sonarr, Radarr, Prowlarr, and Seerr wiring to match `.env`.
+The Compose stack includes a `stack-setup` one-shot service. On `docker compose up`, it waits for the running services, runs `./scripts/update-config.sh`, then runs `./scripts/configure-app-connections.py`. These scripts are idempotent: they create/update the qBittorrent, Sonarr, Radarr, Prowlarr, and Seerr wiring to match `.env`.
 
 The only values most users need to fill are:
 
@@ -127,7 +127,7 @@ COMPOSE_PROFILES=paperless,vaultwarden docker compose up -d
 COMPOSE_PROFILES=tandoor,tandoor-backup docker compose up -d
 ```
 
-`./setup-stack.sh` is still available when you want the older wrapper behavior, such as creating `.env`, detecting `USER_ID`, `GROUP_ID`, and `TIMEZONE`, or passing `--set KEY=VALUE`.
+`./scripts/setup-stack.sh` is still available when you want the older wrapper behavior, such as creating `.env`, detecting `USER_ID`, `GROUP_ID`, and `TIMEZONE`, or passing `--set KEY=VALUE`.
 
 The setup automation completes Jellyfin's startup wizard when Jellyfin has no users yet, creates the admin account from `ADMIN_USERNAME` and `GLOBAL_PASSWORD`, applies `JELLYFIN_SERVER_NAME`, seeds Movies, Shows, and Music libraries, and then configures Seerr against Jellyfin.
 
@@ -261,7 +261,7 @@ It creates the root folders, creates qBittorrent categories, points the download
 If you want to run just the integration step again, use:
 
 ```shell
-./configure-app-connections.py
+./scripts/configure-app-connections.py
 ```
 
 Because all the networking for qBittorrent takes place in the VPN container, the hostname for qBittorrent is the hostname of the VPN container, ie `vpn`, and the port is `8080`.
@@ -278,7 +278,7 @@ Their API keys can be found in Settings > Security > API Key.
 
 ## qBittorrent
 
-Running `update-config.sh` will set qBittorrent's username to `QBITTORRENT_USERNAME` or `ADMIN_USERNAME`, and its password to `QBITTORRENT_PASSWORD` or `GLOBAL_PASSWORD`. If you wish to update the password manually,
+Running `scripts/update-config.sh` will set qBittorrent's username to `QBITTORRENT_USERNAME` or `ADMIN_USERNAME`, and its password to `QBITTORRENT_PASSWORD` or `GLOBAL_PASSWORD`. If you wish to update the password manually,
 since qBittorrent v4.6.2, a temporary password is generated on startup. Get it with `docker compose logs qbittorrent`:
 
 ```
@@ -341,7 +341,7 @@ When Seerr has no users yet, the automation completes Seerr's initial Jellyfin c
 If you want to run just the integration step again, use:
 
 ```shell
-./configure-app-connections.py
+./scripts/configure-app-connections.py
 ```
 
 The values used are:
