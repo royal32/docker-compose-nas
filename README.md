@@ -112,6 +112,7 @@ The only values most users need to fill are:
 - `DATA_ROOT`, `DOWNLOAD_ROOT`, and `IMMICH_UPLOAD_LOCATION` for host media paths.
 - `PIA_LOCATION`, `PIA_USER`, `PIA_PASS`, and usually `PIA_LOCAL_NETWORK` for Private Internet Access.
 - `GLOBAL_PASSWORD` if you want a password other than `adminadmin`.
+- `JELLYFIN_SERVER_NAME` if you want Jellyfin to show a custom server name.
 
 Every service username defaults to `admin`. Blank per-service password fields use `GLOBAL_PASSWORD`; fill a service-specific password only when it should differ.
 
@@ -127,7 +128,7 @@ COMPOSE_PROFILES=tandoor,tandoor-backup docker compose up -d
 
 `./setup-stack.sh` is still available when you want the older wrapper behavior, such as creating `.env`, detecting `USER_ID`, `GROUP_ID`, and `TIMEZONE`, or passing `--set KEY=VALUE`.
 
-If you want to show Jellyfin information in the homepage, create it in Jellyfin settings and fill `JELLYFIN_API_KEY`.
+The setup automation completes Jellyfin's startup wizard when Jellyfin has no users yet, creates the admin account from `ADMIN_USERNAME` and `GLOBAL_PASSWORD`, applies `JELLYFIN_SERVER_NAME`, seeds Movies, Shows, and Music libraries, and then configures Seerr against Jellyfin.
 
 ## Environment Variables
 
@@ -152,6 +153,9 @@ If you want to show Jellyfin information in the homepage, create it in Jellyfin 
 | `ADGUARD_PASSWORD`             | Optional - AdGuard Home password override                                                                                                                                                              |                                                  |
 | `QBITTORRENT_USERNAME`         | Optional qBittorrent username override                                                                                                                                                                 |                                                  |
 | `QBITTORRENT_PASSWORD`         | Optional qBittorrent password override                                                                                                                                                                 |                                                  |
+| `JELLYFIN_SERVER_NAME`         | Jellyfin server name applied during automated setup                                                                                                                                                    | `Docker-Compose NAS`                             |
+| `JELLYFIN_ADMIN_USERNAME`      | Optional Jellyfin admin username override; blank uses `ADMIN_USERNAME`                                                                                                                                 |                                                  |
+| `JELLYFIN_ADMIN_PASSWORD`      | Optional Jellyfin admin password override; blank uses `GLOBAL_PASSWORD`                                                                                                                                |                                                  |
 | `QBITTORRENT_SAVE_PATH`        | Default qBittorrent download path inside the container                                                                                                                                                  | `/data/torrents`                                 |
 | `QBITTORRENT_TEMP_PATH`        | qBittorrent temporary download path inside the container                                                                                                                                                | `/data/torrents/incomplete`                      |
 | `SONARR_ROOT_FOLDER`           | Sonarr root folder created and configured automatically                                                                                                                                                 | `/data/media/tv`                                 |
@@ -197,9 +201,9 @@ If you want to show Jellyfin information in the homepage, create it in Jellyfin 
 | `SEERR_SYNC_ENABLED`           | Whether Seerr should enable periodic sync against Sonarr/Radarr                                                                                                                                       | `true`                                           |
 | `SEERR_AUTO_SEARCH`            | Whether Seerr should enable automatic search for approved Sonarr/Radarr requests                                                                                                                       | `true`                                           |
 | `SEERR_JELLYFIN_EXTERNAL_URL`  | Optional external Jellyfin URL used in Seerr; defaults to `https://${HOSTNAME}/jellyfin` when left empty                                                                                              |                                                  |
-| `SEERR_JELLYFIN_ADMIN_USERNAME` | Optional Jellyfin admin username used once by setup automation to complete Seerr's initial Jellyfin connection and create Seerr's Jellyfin API key                                                   |                                                  |
-| `SEERR_JELLYFIN_ADMIN_PASSWORD` | Optional Jellyfin admin password used once with `SEERR_JELLYFIN_ADMIN_USERNAME`                                                                                                                       |                                                  |
-| `SEERR_JELLYFIN_ADMIN_EMAIL`   | Optional email address for the Seerr admin user created during automated Jellyfin setup; defaults to `SEERR_JELLYFIN_ADMIN_USERNAME`                                                                  |                                                  |
+| `SEERR_JELLYFIN_ADMIN_USERNAME` | Optional Jellyfin admin username override used by Seerr; blank uses `JELLYFIN_ADMIN_USERNAME`, which itself falls back to `ADMIN_USERNAME`                                                          |                                                  |
+| `SEERR_JELLYFIN_ADMIN_PASSWORD` | Optional Jellyfin admin password override used by Seerr; blank uses `JELLYFIN_ADMIN_PASSWORD`, which itself falls back to `GLOBAL_PASSWORD`                                                         |                                                  |
+| `SEERR_JELLYFIN_ADMIN_EMAIL`   | Optional email address for the Seerr admin user created during automated Jellyfin setup; defaults to the effective Seerr Jellyfin username                                                            |                                                  |
 
 ## PIA WireGuard VPN
 
@@ -325,11 +329,11 @@ Set the `SEERR_HOSTNAME`, since it does not support
 [running in a subfolder](https://github.com/seerr-team/seerr/pull/1411).
 Add the necessary DNS records in your domain.
 
-`./setup-stack.sh` now preconfigures Seerr's Sonarr and Radarr services automatically, syncs Seerr's API key back into `.env` for the Homepage widget, and preconfigures Jellyfin connection details when Jellyfin is enabled.
+`docker compose up` now preconfigures Seerr's Sonarr and Radarr services automatically, syncs Seerr's API key back into `.env` for the Homepage widget, and preconfigures Jellyfin connection details when Jellyfin is enabled.
 
-If `SEERR_JELLYFIN_ADMIN_USERNAME` and `SEERR_JELLYFIN_ADMIN_PASSWORD` are set before setup runs, the automation will also complete Seerr's initial Jellyfin connection, create Seerr's Jellyfin API key, mark Seerr's initial setup complete, and sync that key back into `JELLYFIN_API_KEY` for the Homepage widget.
+Seerr uses the Jellyfin admin credentials by default. Set `SEERR_JELLYFIN_ADMIN_USERNAME` and `SEERR_JELLYFIN_ADMIN_PASSWORD` only if Seerr should authenticate with different Jellyfin credentials.
 
-If those credentials are left empty, the Seerr preconfiguration still seeds the Sonarr/Radarr side and Jellyfin host details, but leaves the first Seerr admin sign-in to the normal Seerr setup flow. If `JELLYFIN_API_KEY` is already set, rerunning the connection automation will store that key in Seerr's media-server settings.
+When Seerr has no users yet, the automation completes Seerr's initial Jellyfin connection, creates Seerr's Jellyfin API key, marks Seerr's initial setup complete, and syncs that key back into `JELLYFIN_API_KEY` for the Homepage widget. If `JELLYFIN_API_KEY` is already set, rerunning the connection automation stores that key in Seerr's media-server settings.
 
 If you want to run just the integration step again, use:
 

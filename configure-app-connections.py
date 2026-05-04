@@ -12,6 +12,7 @@ import ssl
 import subprocess
 import sys
 import time
+import uuid
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -129,7 +130,6 @@ def apply_blank_aware_defaults(env: dict[str, str]) -> dict[str, str]:
         "ADGUARD_USERNAME",
         "CALIBRE_USERNAME",
         "PAPERLESS_ADMIN_USER",
-        "SEERR_JELLYFIN_ADMIN_USERNAME",
     ):
         if not env.get(key):
             env[key] = admin_username
@@ -139,10 +139,22 @@ def apply_blank_aware_defaults(env: dict[str, str]) -> dict[str, str]:
         "ADGUARD_PASSWORD",
         "CALIBRE_PASSWORD",
         "PAPERLESS_ADMIN_PASSWORD",
-        "SEERR_JELLYFIN_ADMIN_PASSWORD",
     ):
         if not env.get(key):
             env[key] = global_password
+
+    if not env.get("JELLYFIN_ADMIN_USERNAME"):
+        env["JELLYFIN_ADMIN_USERNAME"] = admin_username
+    if not env.get("JELLYFIN_ADMIN_PASSWORD"):
+        env["JELLYFIN_ADMIN_PASSWORD"] = global_password
+    if not env.get("SEERR_JELLYFIN_ADMIN_USERNAME"):
+        env["SEERR_JELLYFIN_ADMIN_USERNAME"] = env["JELLYFIN_ADMIN_USERNAME"]
+    if not env.get("SEERR_JELLYFIN_ADMIN_PASSWORD"):
+        env["SEERR_JELLYFIN_ADMIN_PASSWORD"] = env["JELLYFIN_ADMIN_PASSWORD"]
+    if not env.get("SEERR_JELLYFIN_ADMIN_EMAIL"):
+        env["SEERR_JELLYFIN_ADMIN_EMAIL"] = env["SEERR_JELLYFIN_ADMIN_USERNAME"]
+    if not env.get("JELLYFIN_SERVER_NAME"):
+        env["JELLYFIN_SERVER_NAME"] = "Jellyfin"
 
     return env
 
@@ -491,6 +503,12 @@ class JellyfinApi(ContainerJsonClient):
     def __init__(self) -> None:
         super().__init__("jellyfin", "http://127.0.0.1:8096/jellyfin")
 
+    @classmethod
+    def authenticated(cls, access_token: str) -> "JellyfinApi":
+        api = cls()
+        api.default_headers = {"X-Emby-Token": access_token}
+        return api
+
     def get_public_info(self) -> dict[str, Any]:
         command = [
             "exec",
@@ -502,6 +520,76 @@ class JellyfinApi(ContainerJsonClient):
         ]
         result = run_compose(command)
         return json.loads(result.stdout)
+
+    def get_startup_configuration(self) -> dict[str, Any]:
+        return self.request_json("GET", "/Startup/Configuration") or {}
+
+    def set_startup_configuration(self, payload: dict[str, Any]) -> None:
+        self.request_json("POST", "/Startup/Configuration", payload=payload, expect_json=False)
+
+    def set_startup_user(self, username: str, password: str) -> None:
+        errors = []
+        for payload in (
+            {"Name": username, "Password": password},
+            {"Username": username, "Password": password},
+        ):
+            try:
+                self.request_json("POST", "/Startup/User", payload=payload, expect_json=False)
+                return
+            except RuntimeError as exc:
+                errors.append(str(exc))
+
+        raise RuntimeError("\n".join(errors))
+
+    def set_startup_remote_access(self) -> None:
+        payload = {"EnableRemoteAccess": True, "EnableAutomaticPortMapping": False}
+        self.request_json("POST", "/Startup/RemoteAccess", payload=payload, expect_json=False)
+
+    def complete_startup(self) -> None:
+        self.request_json("POST", "/Startup/Complete", payload={}, expect_json=False)
+
+    def authenticate(self, username: str, password: str) -> str:
+        auth_header = (
+            'MediaBrowser Client="Docker Compose NAS Setup", '
+            'Device="Docker Compose NAS", '
+            f'DeviceId="{uuid.uuid5(uuid.NAMESPACE_DNS, "docker-compose-nas-jellyfin-setup")}", '
+            'Version="1.0"'
+        )
+        client = JellyfinApi()
+        client.default_headers = {"Authorization": auth_header}
+        payload = {"Username": username, "Pw": password}
+        response = client.request_json("POST", "/Users/AuthenticateByName", payload=payload) or {}
+        token = response.get("AccessToken", "")
+        if not token:
+            raise RuntimeError("Jellyfin authentication did not return an access token")
+        return token
+
+    def get_current_user(self) -> dict[str, Any]:
+        return self.request_json("GET", "/Users/Me") or {}
+
+    def update_user(self, user_id: str, payload: dict[str, Any]) -> None:
+        query = parse.urlencode({"userId": user_id})
+        self.request_json("POST", f"/Users?{query}", payload=payload, expect_json=False)
+
+    def get_system_configuration(self) -> dict[str, Any]:
+        return self.request_json("GET", "/System/Configuration") or {}
+
+    def set_system_configuration(self, payload: dict[str, Any]) -> None:
+        self.request_json("POST", "/System/Configuration", payload=payload, expect_json=False)
+
+    def get_virtual_folders(self) -> list[dict[str, Any]]:
+        return self.request_json("GET", "/Library/VirtualFolders") or []
+
+    def create_virtual_folder(self, name: str, collection_type: str, path: str) -> None:
+        query = parse.urlencode(
+            {
+                "name": name,
+                "collectionType": collection_type,
+                "paths": path,
+                "refreshLibrary": "false",
+            }
+        )
+        self.request_json("POST", f"/Library/VirtualFolders?{query}", payload={}, expect_json=False)
 
 
 class SeerrApi(ContainerJsonClient):
@@ -717,6 +805,165 @@ def clear_seeded_jellyfin_settings_for_initial_setup(settings: dict[str, Any]) -
     return changed
 
 
+def jellyfin_startup_completed(public_info: dict[str, Any]) -> bool:
+    for key in ("StartupWizardCompleted", "IsStartupWizardCompleted"):
+        if key in public_info:
+            return bool(public_info[key])
+    return False
+
+
+def complete_jellyfin_startup(api: JellyfinApi, env: dict[str, str], dry_run: bool) -> bool:
+    username = env["JELLYFIN_ADMIN_USERNAME"]
+    password = env["JELLYFIN_ADMIN_PASSWORD"]
+    server_name = env["JELLYFIN_SERVER_NAME"]
+
+    if dry_run:
+        log(f"[dry-run] Would complete Jellyfin startup wizard with admin user {username}")
+        return True
+
+    configuration = api.get_startup_configuration()
+    configuration.update(
+        {
+            "ServerName": server_name,
+            "UICulture": configuration.get("UICulture") or "en-US",
+            "MetadataCountryCode": configuration.get("MetadataCountryCode") or "US",
+            "PreferredMetadataLanguage": configuration.get("PreferredMetadataLanguage") or "en",
+        }
+    )
+    api.set_startup_configuration(configuration)
+    api.set_startup_user(username, password)
+    api.set_startup_remote_access()
+    api.complete_startup()
+    log(f"Completed Jellyfin startup wizard and created admin user {username}")
+    return True
+
+
+def ensure_jellyfin_admin_login(api: JellyfinApi, env: dict[str, str], dry_run: bool) -> str:
+    username = env["JELLYFIN_ADMIN_USERNAME"]
+    password = env["JELLYFIN_ADMIN_PASSWORD"]
+
+    try:
+        return api.authenticate(username, password)
+    except RuntimeError:
+        pass
+
+    fallback_usernames = []
+    if username != "abc":
+        fallback_usernames.append("abc")
+
+    for fallback_username in fallback_usernames:
+        try:
+            token = api.authenticate(fallback_username, password)
+        except RuntimeError:
+            continue
+
+        if dry_run:
+            log(f"[dry-run] Would rename Jellyfin user {fallback_username} to {username}")
+            return token
+
+        authenticated_api = JellyfinApi.authenticated(token)
+        user = authenticated_api.get_current_user()
+        user_id = user["Id"]
+        user["Name"] = username
+        authenticated_api.update_user(user_id, user)
+        log(f"Renamed Jellyfin user {fallback_username} to {username}")
+        return api.authenticate(username, password)
+
+    raise RuntimeError(f"Jellyfin admin login failed for {username}")
+
+
+def ensure_jellyfin_server_name(api: JellyfinApi, env: dict[str, str], dry_run: bool) -> bool:
+    desired_name = env["JELLYFIN_SERVER_NAME"]
+    public_info = api.get_public_info()
+    if public_info.get("ServerName") == desired_name:
+        log("Jellyfin server name already matches the desired state")
+        return False
+
+    if dry_run:
+        log(f"[dry-run] Would set Jellyfin server name to {desired_name}")
+        return True
+
+    token = ensure_jellyfin_admin_login(api, env, dry_run)
+    authenticated_api = JellyfinApi.authenticated(token)
+    configuration = authenticated_api.get_system_configuration()
+    configuration["ServerName"] = desired_name
+    authenticated_api.set_system_configuration(configuration)
+    log(f"Updated Jellyfin server name to {desired_name}")
+    return True
+
+
+def ensure_jellyfin_libraries(api: JellyfinApi, env: dict[str, str], dry_run: bool) -> None:
+    if dry_run:
+        for name, _, path in (
+            ("Movies", "movies", env["RADARR_ROOT_FOLDER"]),
+            ("Shows", "tvshows", env["SONARR_ROOT_FOLDER"]),
+            ("Music", "music", env["LIDARR_ROOT_FOLDER"]),
+        ):
+            log(f"[dry-run] Would ensure Jellyfin {name} library at {path}")
+        return
+
+    token = ensure_jellyfin_admin_login(api, env, dry_run)
+    authenticated_api = JellyfinApi.authenticated(token)
+    existing_folders = authenticated_api.get_virtual_folders()
+
+    desired_libraries = (
+        ("Movies", "movies", env["RADARR_ROOT_FOLDER"]),
+        ("Shows", "tvshows", env["SONARR_ROOT_FOLDER"]),
+        ("Music", "music", env["LIDARR_ROOT_FOLDER"]),
+    )
+
+    for name, collection_type, path in desired_libraries:
+        ensure_directory("jellyfin", path, dry_run)
+
+        existing = next(
+            (
+                folder
+                for folder in existing_folders
+                if folder.get("Name") == name
+                or path in folder.get("Locations", [])
+                or path in folder.get("Paths", [])
+            ),
+            None,
+        )
+        if existing is not None:
+            log(f"Jellyfin library already present: {name}")
+            continue
+
+        try:
+            authenticated_api.create_virtual_folder(name, collection_type, path)
+            log(f"Created Jellyfin {name} library at {path}")
+        except RuntimeError as exc:
+            log(f"Skipping Jellyfin {name} library creation after API error: {exc}")
+
+
+def ensure_jellyfin_setup(env: dict[str, str], running_services: set[str], dry_run: bool) -> None:
+    if "jellyfin" not in running_services:
+        log("Skipping Jellyfin automation because the service is not running")
+        return
+
+    api = JellyfinApi()
+    public_info = api.get_public_info()
+
+    if not jellyfin_startup_completed(public_info):
+        complete_jellyfin_startup(api, env, dry_run)
+    else:
+        log("Jellyfin startup wizard already complete")
+
+    try:
+        changed = ensure_jellyfin_server_name(api, env, dry_run)
+        if changed and not dry_run:
+            run_compose(["restart", "jellyfin"])
+            time.sleep(5)
+            log("Restarted Jellyfin after server-name update")
+    except RuntimeError as exc:
+        log(f"Skipping Jellyfin server-name update after API error: {exc}")
+
+    try:
+        ensure_jellyfin_libraries(api, env, dry_run)
+    except RuntimeError as exc:
+        log(f"Skipping Jellyfin library setup after API error: {exc}")
+
+
 def ensure_seerr_jellyfin_admin_setup(settings_path: Path, settings: dict[str, Any], env: dict[str, str], dry_run: bool) -> dict[str, Any]:
     username = env.get("SEERR_JELLYFIN_ADMIN_USERNAME", "")
     password = env.get("SEERR_JELLYFIN_ADMIN_PASSWORD", "")
@@ -747,10 +994,12 @@ def ensure_seerr_jellyfin_admin_setup(settings_path: Path, settings: dict[str, A
     try:
         SeerrApi().authenticate_jellyfin_admin(env)
     except RuntimeError as exc:
-        raise RuntimeError(
+        log(
             "Seerr could not authenticate to Jellyfin. Check "
             "SEERR_JELLYFIN_ADMIN_USERNAME and SEERR_JELLYFIN_ADMIN_PASSWORD in .env."
-        ) from exc
+        )
+        log(f"Skipping Seerr Jellyfin initial setup after API error: {exc}")
+        return settings
     log("Authenticated Seerr to Jellyfin and created the Seerr Jellyfin API key")
     settings = json.loads(settings_path.read_text())
 
@@ -1113,6 +1362,7 @@ def main() -> int:
     parser.add_argument("--skip-qbittorrent", action="store_true", help="Skip qBittorrent path and category updates")
     parser.add_argument("--skip-arr", action="store_true", help="Skip Sonarr/Radarr/Lidarr root folders and download clients")
     parser.add_argument("--skip-prowlarr", action="store_true", help="Skip Prowlarr application links")
+    parser.add_argument("--skip-jellyfin", action="store_true", help="Skip Jellyfin initial setup and library configuration")
     parser.add_argument("--skip-seerr", action="store_true", help="Skip Seerr service and media-server preconfiguration")
     args = parser.parse_args()
 
@@ -1130,6 +1380,9 @@ def main() -> int:
 
     if not args.skip_prowlarr:
         ensure_prowlarr_integrations(env, running_services, args.dry_run)
+
+    if not args.skip_jellyfin:
+        ensure_jellyfin_setup(env, running_services, args.dry_run)
 
     if not args.skip_seerr:
         ensure_seerr_integrations(env, running_services, args.dry_run)

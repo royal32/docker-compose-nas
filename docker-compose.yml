@@ -516,6 +516,7 @@ services:
       - ${CONFIG_ROOT:-.}/jellyfin:/config
       - ${DATA_ROOT}:/data
     ports:
+      - "8096:8096"
       - "7359:7359/udp"
       - "1900:1900/udp"
     restart: always
