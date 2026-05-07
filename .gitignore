@@ -1,6 +1,7 @@
 *.env
 .idea
 docker-compose.override.yml
+/runtime
 /homepage/logs
 /homepage/*.yaml
 /homepage/*.css
@@ -8,12 +9,15 @@ docker-compose.override.yml
 /sonarr
 /radarr
 /prowlarr
+/jellyfin.broken-*
 /lidarr
 /bazarr
 /huntarr
 /qbittorrent
 /pia
-/pia-shared
+!/pia-shared/
+/pia-shared/*
+!/pia-shared/portupdate-qbittorrent.sh
 /letsencrypt
 /traefik
 /seerr

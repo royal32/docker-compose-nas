@@ -8,11 +8,14 @@ services:
     container_name: stack-bootstrap
     restart: "no"
     environment:
-      - NAS_HOST_HOSTNAME=${HOST_HOSTNAME:-${HOSTNAME:-}}
+      - NAS_HOST_HOSTNAME=${HOST_HOSTNAME:-}
+      - USER_ID=${USER_ID}
+      - GROUP_ID=${GROUP_ID}
     command: ["/bin/bash", "/stack/scripts/compose-bootstrap.sh"]
     volumes:
       - .:/stack
       - /var/run/docker.sock:/var/run/docker.sock
+      - /etc/hostname:/host/etc/hostname:ro
 
   stack-setup:
     build:
@@ -24,10 +27,11 @@ services:
       - SETUP_WAIT_TIMEOUT=${SETUP_WAIT_TIMEOUT:-300}
       - USER_ID=${USER_ID}
       - GROUP_ID=${GROUP_ID}
-      - NAS_HOST_HOSTNAME=${HOST_HOSTNAME:-${HOSTNAME:-}}
+      - NAS_HOST_HOSTNAME=${HOST_HOSTNAME:-}
     volumes:
       - .:/stack
       - /var/run/docker.sock:/var/run/docker.sock
+      - /etc/hostname:/host/etc/hostname:ro
     depends_on:
       stack-bootstrap:
         condition: service_completed_successfully
@@ -36,8 +40,6 @@ services:
       sonarr:
         condition: service_started
       radarr:
-        condition: service_started
-      bazarr:
         condition: service_started
       prowlarr:
         condition: service_started
@@ -90,7 +92,7 @@ services:
       - --certificatesresolvers.myresolver.acme.caserver=${LETS_ENCRYPT_CA_SERVER:-https://acme-v02.api.letsencrypt.org/directory}
       - --certificatesresolvers.myresolver.acme.email=${LETS_ENCRYPT_EMAIL}
       - --certificatesresolvers.myresolver.acme.storage=/letsencrypt/acme.json
-      - --providers.file.directory=/traefik-dynamic
+      - --providers.file.filename=/traefik-dynamic/local-tls.yml
       - --providers.file.watch=true
     ports:
       - "80:80"
@@ -102,10 +104,14 @@ services:
       - "/var/run/docker.sock:/var/run/docker.sock:ro"
     extra_hosts:
       - host.docker.internal:172.17.0.1
+    depends_on:
+      stack-bootstrap:
+        condition: service_completed_successfully
     healthcheck:
       test: ["CMD", "traefik", "healthcheck", "--ping"]
-      interval: 1m
-      retries: 10
+      interval: 10s
+      timeout: 5s
+      retries: 30
   sonarr:
     image: lscr.io/linuxserver/sonarr
     container_name: sonarr
@@ -119,8 +125,9 @@ services:
     restart: always
     healthcheck:
       test: ["CMD", "curl", "--fail", "http://127.0.0.1:8989/sonarr/ping"]
-      interval: 1m
-      retries: 10
+      interval: 10s
+      timeout: 5s
+      retries: 30
     labels:
       - traefik.enable=true
       - traefik.http.routers.sonarr.rule=PathPrefix(`/sonarr`)
@@ -149,8 +156,9 @@ services:
     restart: always
     healthcheck:
       test: ["CMD", "curl", "--fail", "http://127.0.0.1:7878/radarr/ping"]
-      interval: 1m
-      retries: 10
+      interval: 10s
+      timeout: 5s
+      retries: 30
     labels:
       - traefik.enable=true
       - traefik.http.routers.radarr.rule=PathPrefix(`/radarr`)
@@ -179,8 +187,9 @@ services:
     restart: always
     healthcheck:
       test: ["CMD", "curl", "--fail", "http://127.0.0.1:8686/lidarr/ping"]
-      interval: 1m
-      retries: 10
+      interval: 10s
+      timeout: 5s
+      retries: 30
     labels:
       - traefik.enable=true
       - traefik.http.routers.lidarr.rule=PathPrefix(`/lidarr`)
@@ -211,8 +220,9 @@ services:
     restart: always
     healthcheck:
       test: ["CMD", "curl", "--fail", "http://127.0.0.1:6767/bazarr/ping"]
-      interval: 1m
-      retries: 10
+      interval: 10s
+      timeout: 5s
+      retries: 30
     labels:
       - traefik.enable=true
       - traefik.http.routers.bazarr.rule=PathPrefix(`/bazarr`)
@@ -228,6 +238,8 @@ services:
       - homepage.widget.type=bazarr
       - homepage.widget.url=http://bazarr:6767/bazarr
       - homepage.widget.key=${BAZARR_API_KEY}
+    profiles:
+      - bazarr
   seerr:
     image: ghcr.io/seerr-team/seerr:latest
     init: true
@@ -242,8 +254,8 @@ services:
       test: wget --no-verbose --tries=1 --spider http://localhost:5055/api/v1/status || exit 1
       start_period: 20s
       timeout: 3s
-      interval: 1m
-      retries: 10
+      interval: 10s
+      retries: 30
     labels:
       - traefik.enable=true
       - traefik.http.routers.seerr.rule=(Host(`${SEERR_HOSTNAME}`))
@@ -271,8 +283,9 @@ services:
     restart: always
     healthcheck:
       test: ["CMD", "curl", "--fail", "http://127.0.0.1:9696/prowlarr/ping"]
-      interval: 1m
-      retries: 10
+      interval: 10s
+      timeout: 5s
+      retries: 30
     labels:
       - traefik.enable=true
       - traefik.http.routers.prowlarr.rule=PathPrefix(`/prowlarr`)
@@ -378,8 +391,9 @@ services:
       # see: https://github.com/qdm12/gluetun/issues/641#issuecomment-933856220
       test:
         ["CMD", "curl", "--fail", "http://127.0.0.1:8080", "https://google.com"]
-      interval: 1m
-      retries: 10
+      interval: 10s
+      timeout: 10s
+      retries: 30
     network_mode: "service:vpn"
     depends_on:
       vpn:
@@ -426,9 +440,8 @@ services:
       - QBT_USER=${QBITTORRENT_USERNAME:-${ADMIN_USERNAME:-admin}}
       - QBT_PASS=${QBITTORRENT_PASSWORD:-${GLOBAL_PASSWORD:-adminadmin}}
       - LOCAL_NETWORK=${PIA_LOCAL_NETWORK}
-      - PORT_FORWARDING=1
+      - PORT_FORWARDING=${PIA_PORT_FORWARDING:-0}
       - PORT_PERSIST=1
-      - PORT_SCRIPT=/pia-shared/portupdate-qbittorrent.sh
       - FIREWALL=0
       - ACTIVE_HEALTHCHECKS=1
       - RECONNECT=1
@@ -469,6 +482,8 @@ services:
       options:
         max-size: "10m"
         max-file: "5"
+    profiles:
+      - unpackerr
   cleanuparr:
     image: ghcr.io/cleanuparr/cleanuparr:latest
     container_name: cleanuparr
@@ -548,9 +563,10 @@ services:
       - "1900:1900/udp"
     restart: always
     healthcheck:
-      test: ["CMD", "curl", "--fail", "http://127.0.0.1:8096/jellyfin/health"]
-      interval: 1m
-      retries: 10
+      test: ["CMD-SHELL", "curl --fail http://127.0.0.1:8096/jellyfin/health || curl --fail http://127.0.0.1:8096/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 30
     labels:
       - traefik.enable=true
       - traefik.http.routers.jellyfin.rule=PathPrefix(`/jellyfin`)
@@ -622,7 +638,7 @@ services:
       - "3000:3000"
     restart: always
     command:
-      [sh, -c, "cp -n /app/config/tpl/*.yaml /app/config && node server.js"]
+      [sh, -c, "if [ -d /app/config/tpl ]; then cp -f /app/config/tpl/*.yaml /app/config/ 2>/dev/null || true; fi; node server.js"]
     labels:
       - traefik.enable=true
       - traefik.http.routers.homepage.rule=PathPrefix(`/`)
@@ -639,6 +655,8 @@ services:
       - WATCHTOWER_INCLUDE_STOPPED=true
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
+    profiles:
+      - watchtower
   autoheal:
     image: willfarrell/autoheal:latest
     container_name: autoheal
@@ -647,6 +665,8 @@ services:
       - AUTOHEAL_CONTAINER_LABEL=all
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
+    profiles:
+      - autoheal
 
 networks:
   default:

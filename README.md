@@ -110,6 +110,7 @@ The Compose stack includes a `stack-setup` one-shot service. On `docker compose 
 The only values most users need to fill are:
 
 - `DATA_ROOT`, `DOWNLOAD_ROOT`, and `IMMICH_UPLOAD_LOCATION` for host media paths.
+- `CONFIG_ROOT` for app runtime config/databases. Delete this directory between test runs to reset the stack without deleting media.
 - `PIA_LOCATION`, `PIA_USER`, `PIA_PASS`, and usually `PIA_LOCAL_NETWORK` for Private Internet Access.
 - `GLOBAL_PASSWORD` if you want a password other than `adminadmin`.
 - `JELLYFIN_SERVER_NAME` if you want Jellyfin to show a custom server name.
@@ -138,6 +139,7 @@ The setup automation completes Jellyfin's startup wizard when Jellyfin has no us
 | `DATA_ROOT`                    | Host location of the data files                                                                                                                                                                        | `/mnt/data`                                      |
 | `DOWNLOAD_ROOT`                | Host download location for qBittorrent, should be a subfolder of `DATA_ROOT`                                                                                                                           | `/mnt/data/torrents`                             |
 | `IMMICH_UPLOAD_LOCATION`       | Host location for Immich uploads, if Immich is enabled                                                                                                                                                 | `/mnt/data/photos`                               |
+| `CONFIG_ROOT`                  | Host location for generated service config, app databases, Traefik local certs, and other resettable runtime state                                                                                      | `./runtime`                                      |
 | `PIA_LOCATION`                 | Servers to use for PIA. [see list here](https://serverlist.piaservers.net/vpninfo/servers/v6)                                                                                                          | `ca` (Montreal, Canada)                          |
 | `PIA_USER`                     | PIA username                                                                                                                                                                                           |                                                  |
 | `PIA_PASS`                     | PIA password                                                                                                                                                                                           |                                                  |

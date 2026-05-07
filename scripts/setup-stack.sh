@@ -98,9 +98,17 @@ set_env_value() {
   local key="$2"
   local value="$3"
   local tmp_file
+  local current_line
+  local formatted_value
+
+  current_line=$(awk -F= -v key="$key" '$1 == key { print substr($0, index($0, "=") + 1) }' "$file" | tail -n 1)
+  formatted_value="$value"
+  if [[ "$current_line" == \"*\" && "$current_line" == *\" && ! ( "$formatted_value" == \"*\" && "$formatted_value" == *\" ) ]]; then
+    formatted_value="\"${value//\"/\\\"}\""
+  fi
 
   tmp_file=$(mktemp)
-  awk -v key="$key" -v value="$value" '
+  awk -v key="$key" -v value="$formatted_value" '
     BEGIN { updated = 0 }
     index($0, key "=") == 1 {
       print key "=" value
@@ -115,6 +123,37 @@ set_env_value() {
     }
   ' "$file" > "$tmp_file"
   mv "$tmp_file" "$file"
+}
+
+set_env_value_quoted() {
+  local file="$1"
+  local key="$2"
+  local value="$3"
+  local escaped_value
+
+  escaped_value="${value//\"/\\\"}"
+  set_env_value "$file" "$key" "\"$escaped_value\""
+}
+
+normalize_env_value_quotes() {
+  local file="$1"
+  local key="$2"
+  local value
+
+  value=$(get_env_value "$file" "$key" || true)
+  [[ -n "$value" ]] || return 0
+  set_env_value_quoted "$file" "$key" "$value"
+}
+
+get_config_root() {
+  local config_root
+
+  config_root=$(get_env_value "$ENV_FILE" "CONFIG_ROOT" || printf './runtime')
+  if [[ "$config_root" = /* ]]; then
+    printf '%s' "$config_root"
+  else
+    printf '%s/%s' "$ROOT_DIR" "$config_root"
+  fi
 }
 
 set_if_missing_or_default() {
@@ -192,17 +231,21 @@ detect_timezone() {
 
 detect_local_hostname() {
   local detected=""
+  local detected_from_host=0
 
   if [[ -n "${NAS_HOST_HOSTNAME:-}" ]]; then
     detected="$NAS_HOST_HOSTNAME"
+    detected_from_host=1
   fi
 
   if [[ -z "$detected" && -f /host/etc/hostname ]]; then
     detected=$(cat /host/etc/hostname 2>/dev/null || true)
+    detected_from_host=1
   fi
 
   if [[ -z "$detected" ]] && command -v scutil >/dev/null 2>&1; then
     detected=$(scutil --get LocalHostName 2>/dev/null || true)
+    detected_from_host=1
   fi
 
   if [[ -z "$detected" ]]; then
@@ -211,6 +254,13 @@ detect_local_hostname() {
 
   detected="${detected%%.*}"
   detected=$(printf '%s' "$detected" | tr '[:upper:]' '[:lower:]' | sed 's/[^a-z0-9-]//g')
+
+  if (( detected_from_host == 0 )) && [[ -f /.dockerenv && "$detected" =~ ^[0-9a-f]{12}$ ]]; then
+    detected="localhost"
+  fi
+  if [[ -f /.dockerenv && "$detected" =~ ^(orbstack|docker-desktop)$ ]]; then
+    detected="localhost"
+  fi
 
   if [[ -z "$detected" ]]; then
     detected="localhost"
@@ -238,7 +288,11 @@ ensure_commands() {
 }
 
 ensure_root_env() {
+  local data_root
+  local config_root
   local local_hostname
+  local user_id
+  local group_id
 
   if [[ ! -f "$ENV_FILE" ]]; then
     cp "$ENV_TEMPLATE" "$ENV_FILE"
@@ -246,11 +300,39 @@ ensure_root_env() {
   fi
 
   local_hostname=$(detect_local_hostname)
-  set_if_missing_or_default "$ENV_FILE" "USER_ID" "1000" "$(id -u)"
-  set_if_missing_or_default "$ENV_FILE" "GROUP_ID" "1000" "$(id -g)"
+  user_id="${USER_ID:-$(id -u)}"
+  group_id="${GROUP_ID:-$(id -g)}"
+  if [[ -f /.dockerenv && "$user_id" == "0" ]]; then
+    user_id="1000"
+  fi
+  if [[ -f /.dockerenv && "$group_id" == "0" ]]; then
+    group_id="1000"
+  fi
+
+  set_if_missing_or_default "$ENV_FILE" "USER_ID" "1000" "$user_id"
+  set_if_missing_or_default "$ENV_FILE" "GROUP_ID" "1000" "$group_id"
   set_if_missing_or_default "$ENV_FILE" "TIMEZONE" "America/New_York" "$(detect_timezone)"
   set_if_missing_or_default "$ENV_FILE" "HOSTNAME" "localhost" "$local_hostname"
   set_if_missing_or_default "$ENV_FILE" "BASE_HOSTNAME" "localhost" "$local_hostname"
+  set_if_missing_or_default "$ENV_FILE" "CONFIG_ROOT" "." "./runtime"
+
+  data_root=$(get_env_value "$ENV_FILE" "DATA_ROOT" || true)
+  if [[ -n "$data_root" ]]; then
+    set_if_missing_or_default "$ENV_FILE" "DOWNLOAD_ROOT" "/mnt/data/torrents" "${data_root%/}/torrents"
+    set_if_missing_or_default "$ENV_FILE" "IMMICH_UPLOAD_LOCATION" "/mnt/data/photos" "${data_root%/}/photos"
+  fi
+
+  config_root=$(get_env_value "$ENV_FILE" "CONFIG_ROOT" || true)
+  if [[ -n "$data_root" && "$config_root" == "${data_root%/}"* ]]; then
+    warn "CONFIG_ROOT is inside DATA_ROOT. Keep app config/databases on a local POSIX filesystem such as ./runtime; removable media can create AppleDouble sidecar files that break XML/SQLite readers."
+  elif [[ "$config_root" == /Volumes/* ]]; then
+    warn "CONFIG_ROOT is on /Volumes. For reliable app databases and XML keyrings, prefer a local path such as ./runtime and keep only media/download data on external storage."
+  fi
+
+  normalize_env_value_quotes "$ENV_FILE" "DATA_ROOT"
+  normalize_env_value_quotes "$ENV_FILE" "DOWNLOAD_ROOT"
+  normalize_env_value_quotes "$ENV_FILE" "IMMICH_UPLOAD_LOCATION"
+  normalize_env_value_quotes "$ENV_FILE" "CONFIG_ROOT"
 }
 
 apply_root_overrides() {
@@ -275,21 +357,26 @@ apply_root_overrides() {
 }
 
 ensure_acme_storage() {
-  mkdir -p "$ROOT_DIR/letsencrypt"
-  touch "$ROOT_DIR/letsencrypt/acme.json"
-  chmod 600 "$ROOT_DIR/letsencrypt/acme.json"
+  local config_root
+
+  config_root=$(get_config_root)
+  mkdir -p "$config_root/letsencrypt"
+  touch "$config_root/letsencrypt/acme.json"
+  chmod 600 "$config_root/letsencrypt/acme.json"
+}
+
+clean_appledouble_files() {
+  local config_root
+
+  config_root=$(get_config_root)
+
+  find "$config_root" -name '._*' -delete 2>/dev/null || true
 }
 
 ensure_seerr_config_permissions() {
-  local config_root
   local seerr_config_dir
 
-  config_root=$(get_env_value "$ENV_FILE" "CONFIG_ROOT" || printf '.')
-  if [[ "$config_root" = /* ]]; then
-    seerr_config_dir="$config_root/seerr"
-  else
-    seerr_config_dir="$ROOT_DIR/$config_root/seerr"
-  fi
+  seerr_config_dir="$(get_config_root)/seerr"
 
   mkdir -p "$seerr_config_dir/logs"
   chmod -R a+rwX "$seerr_config_dir"
@@ -305,12 +392,13 @@ repair_seerr_config_permissions_with_image() {
 }
 
 ensure_local_tls_certificate() {
-  local cert_dir="$ROOT_DIR/traefik/certs"
-  local dynamic_dir="$ROOT_DIR/traefik/dynamic"
-  local cert_file="$cert_dir/local.crt"
-  local key_file="$cert_dir/local.key"
-  local config_file="$cert_dir/local-openssl.cnf"
-  local dynamic_file="$dynamic_dir/local-tls.yml"
+  local config_root
+  local cert_dir
+  local dynamic_dir
+  local cert_file
+  local key_file
+  local config_file
+  local dynamic_file
   local host_name
   local extra_hosts
   local san_entries
@@ -318,6 +406,13 @@ ensure_local_tls_certificate() {
   local host
   local extra_hosts_array=()
 
+  config_root=$(get_config_root)
+  cert_dir="$config_root/traefik/certs"
+  dynamic_dir="$config_root/traefik/dynamic"
+  cert_file="$cert_dir/local.crt"
+  key_file="$cert_dir/local.key"
+  config_file="$cert_dir/local-openssl.cnf"
+  dynamic_file="$dynamic_dir/local-tls.yml"
   host_name=$(get_env_value "$ENV_FILE" "HOSTNAME" || true)
   extra_hosts=$(get_env_value "$ENV_FILE" "LOCAL_TLS_HOSTS" || true)
 
@@ -571,6 +666,7 @@ apply_root_overrides
 ensure_acme_storage
 ensure_seerr_config_permissions
 ensure_local_tls_certificate
+clean_appledouble_files
 
 ACTIVE_PROFILES=$(get_env_value "$ENV_FILE" "COMPOSE_PROFILES" || true)
 TIMEZONE_VALUE=$(get_env_value "$ENV_FILE" "TIMEZONE" || printf 'America/New_York')
@@ -601,5 +697,7 @@ if (( SKIP_WAIT == 0 )); then
   wait_for_stack
 fi
 
-print_setup_complete_banner
-print_remaining_manual_steps "$ACTIVE_PROFILES"
+if ! (( SKIP_UP == 1 && SKIP_BOOTSTRAP == 1 && SKIP_CONNECTIONS == 1 && SKIP_WAIT == 1 )); then
+  print_setup_complete_banner
+  print_remaining_manual_steps "$ACTIVE_PROFILES"
+fi

@@ -16,7 +16,7 @@ detect_name() {
   name="${name%%.*}"
   name=$(printf '%s' "$name" | tr '[:upper:]' '[:lower:]' | sed 's/[^a-z0-9-]//g')
 
-  if [[ -z "$name" || "$name" == "localhost" ]]; then
+  if [[ -z "$name" || "$name" == "localhost" || "$name" == localhost.* || "$name" == *.localhost.local ]]; then
     return 1
   fi
 
@@ -30,12 +30,16 @@ normalize_name() {
   name="${name%.}"
   name=$(printf '%s' "$name" | tr '[:upper:]' '[:lower:]' | sed 's/[^a-z0-9.-]//g')
 
-  if [[ -z "$name" || "$name" == "localhost" ]]; then
+  if [[ -z "$name" || "$name" == "localhost" || "$name" == localhost.* || "$name" == *.localhost.local ]]; then
     return 1
   fi
 
   if [[ "$name" != *.local ]]; then
     name="${name}.local"
+  fi
+
+  if [[ "$name" == "localhost.local" || "$name" == localhost.* || "$name" == *.localhost.local ]]; then
+    return 1
   fi
 
   printf '%s' "$name"

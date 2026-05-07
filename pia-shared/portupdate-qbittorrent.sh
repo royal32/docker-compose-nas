@@ -1,21 +1,41 @@
-#!/bin/bash
+#!/bin/sh
 
-port="$1"
-QBT_PORT=8080
+set -eu
 
-echo "Setting qBittorrent port settings ($port)..."
-# Very basic retry logic so we don't fail if qBittorrent isn't running yet
- while ! curl --silent --retry 10 --retry-delay 15 --max-time 10 \
-  --data "username=${QBT_USER}&password=${QBT_PASS}" \
-  --cookie-jar /tmp/qb-cookies.txt \
-  http://localhost:${QBT_PORT}/api/v2/auth/login
-  do
-    sleep 10
-  done
+port_file=/pia-shared/port.dat
+cookie_file=/tmp/qbit-portupdate-cookies.txt
+qbit_url=http://127.0.0.1:8080
 
-curl --silent --retry 10 --retry-delay 15 --max-time 10 \
-  --data 'json={"listen_port": "'"$port"'"}' \
-  --cookie /tmp/qb-cookies.txt \
-  http://localhost:${QBT_PORT}/api/v2/app/setPreferences
+if [ ! -f "$port_file" ]; then
+  echo "[pf] qBittorrent port update skipped: $port_file is missing"
+  exit 0
+fi
 
-echo "qBittorrent port updated successfully ($port)..."
+port="$(cat "$port_file")"
+if [ -z "$port" ]; then
+  echo "[pf] qBittorrent port update skipped: forwarded port is empty"
+  exit 0
+fi
+
+for attempt in 1 2 3 4 5 6 7 8 9 10; do
+  if curl -fsS \
+    -c "$cookie_file" \
+    -b "$cookie_file" \
+    -H "Content-Type: application/x-www-form-urlencoded" \
+    --data "username=${QBT_USER:-admin}&password=${QBT_PASS:-adminadmin}" \
+    "$qbit_url/api/v2/auth/login" >/dev/null &&
+    curl -fsS \
+      -b "$cookie_file" \
+      -H "Content-Type: application/x-www-form-urlencoded" \
+      --data-urlencode "json={\"listen_port\":${port}}" \
+      "$qbit_url/api/v2/app/setPreferences" >/dev/null; then
+    echo "[pf] qBittorrent port updated successfully (${port})"
+    exit 0
+  fi
+
+  echo "[pf] qBittorrent port update attempt ${attempt} failed; retrying..."
+  sleep 3
+done
+
+echo "[pf] qBittorrent port update skipped: qBittorrent API was not ready"
+exit 0

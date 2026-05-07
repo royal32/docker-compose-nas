@@ -71,6 +71,13 @@ repair_seerr_config_permissions() {
   fi
 }
 
+clean_appledouble_files() {
+  local config_root
+
+  config_root="$(get_config_root)"
+  find "$config_root" -name '._*' -delete 2>/dev/null || true
+}
+
 wait_for_stack() {
   local deadline
   local container_id
@@ -117,15 +124,18 @@ wait_for_stack() {
 }
 
 cd "$ROOT_DIR"
+clean_appledouble_files
 repair_seerr_config_permissions
 wait_for_stack
 
 log "Running first-run post-start configuration"
 ./scripts/update-config.sh
+clean_appledouble_files
 wait_for_stack
 
 log "Automating app-to-app connections"
 python3 ./scripts/configure-app-connections.py
+clean_appledouble_files
 wait_for_stack
 
 log "Setup complete"

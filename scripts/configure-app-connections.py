@@ -161,6 +161,14 @@ def apply_blank_aware_defaults(env: dict[str, str]) -> dict[str, str]:
     return env
 
 
+def get_config_root(env: dict[str, str]) -> Path:
+    config_root = env.get("CONFIG_ROOT") or "./runtime"
+    path = Path(config_root)
+    if path.is_absolute():
+        return path
+    return ROOT_DIR / path
+
+
 def env_bool(env: dict[str, str], key: str, default: bool) -> bool:
     value = env.get(key)
     if value is None or value == "":
@@ -227,15 +235,16 @@ def read_bazarr_api_key(path: Path) -> str:
 
 def sync_generated_api_keys(env: dict[str, str], dry_run: bool) -> bool:
     env_path = ROOT_DIR / ".env"
+    config_root = get_config_root(env)
     discovered = {
-        "SONARR_API_KEY": read_xml_text(ROOT_DIR / "sonarr" / "config.xml", "ApiKey"),
-        "RADARR_API_KEY": read_xml_text(ROOT_DIR / "radarr" / "config.xml", "ApiKey"),
-        "LIDARR_API_KEY": read_xml_text(ROOT_DIR / "lidarr" / "config.xml", "ApiKey"),
-        "PROWLARR_API_KEY": read_xml_text(ROOT_DIR / "prowlarr" / "config.xml", "ApiKey"),
-        "BAZARR_API_KEY": read_bazarr_api_key(ROOT_DIR / "bazarr" / "config" / "config" / "config.yaml"),
+        "SONARR_API_KEY": read_xml_text(config_root / "sonarr" / "config.xml", "ApiKey"),
+        "RADARR_API_KEY": read_xml_text(config_root / "radarr" / "config.xml", "ApiKey"),
+        "LIDARR_API_KEY": read_xml_text(config_root / "lidarr" / "config.xml", "ApiKey"),
+        "PROWLARR_API_KEY": read_xml_text(config_root / "prowlarr" / "config.xml", "ApiKey"),
+        "BAZARR_API_KEY": read_bazarr_api_key(config_root / "bazarr" / "config" / "config" / "config.yaml"),
     }
 
-    seerr_settings_path = ROOT_DIR / "seerr" / "settings.json"
+    seerr_settings_path = config_root / "seerr" / "settings.json"
     if seerr_settings_path.exists():
         try:
             seerr_settings = json.loads(seerr_settings_path.read_text())
@@ -406,7 +415,14 @@ class ContainerJsonClient:
                     return body
                 if not body.strip():
                     return None
-                return json.loads(body)
+                try:
+                    return json.loads(body)
+                except json.JSONDecodeError:
+                    last_error = f"HTTP {status_code} returned non-JSON response"
+                    if attempt < 19:
+                        time.sleep(2)
+                        continue
+                    raise RuntimeError(f"{method} {path} failed: {last_error}")
 
             last_error = result.stderr.strip() or body or f"HTTP {status_code or 'unknown'}"
             if status_code in {"000", "502", "503", "504"} and attempt < 19:
@@ -632,17 +648,30 @@ class JellyfinApi(ContainerJsonClient):
     def set_startup_configuration(self, payload: dict[str, Any]) -> None:
         self.request_json("POST", "/Startup/Configuration", payload=payload, expect_json=False)
 
+    def get_startup_user(self) -> dict[str, Any]:
+        return self.request_json("GET", "/Startup/User") or {}
+
     def set_startup_user(self, username: str, password: str) -> None:
         errors = []
-        for payload in (
-            {"Name": username, "Password": password},
-            {"Username": username, "Password": password},
-        ):
-            try:
-                self.request_json("POST", "/Startup/User", payload=payload, expect_json=False)
-                return
-            except RuntimeError as exc:
-                errors.append(str(exc))
+        for _ in range(120):
+            startup_user = self.get_startup_user()
+            if startup_user.get("Name") or startup_user.get("Username"):
+                break
+            time.sleep(1)
+
+        for attempt in range(60):
+            errors = []
+            for payload in (
+                {"Name": username, "Password": password},
+                {"Username": username, "Password": password},
+            ):
+                try:
+                    self.request_json("POST", "/Startup/User", payload=payload, expect_json=False)
+                    return
+                except RuntimeError as exc:
+                    errors.append(str(exc))
+            if attempt < 59:
+                time.sleep(1)
 
         raise RuntimeError("\n".join(errors))
 
@@ -875,8 +904,8 @@ def build_seerr_sonarr_settings(arr_api: ArrApi, env: dict[str, str]) -> dict[st
     return desired
 
 
-def seerr_user_count() -> int | None:
-    db_path = ROOT_DIR / "seerr" / "db" / "db.sqlite3"
+def seerr_user_count(env: dict[str, str]) -> int | None:
+    db_path = get_config_root(env) / "seerr" / "db" / "db.sqlite3"
     if not db_path.exists():
         return None
 
@@ -1082,7 +1111,7 @@ def ensure_seerr_jellyfin_admin_setup(settings_path: Path, settings: dict[str, A
         log("Seerr Jellyfin API key already exists")
         return settings
 
-    user_count = seerr_user_count()
+    user_count = seerr_user_count(env)
     if user_count not in (0, None):
         log("Skipping Seerr Jellyfin initial setup because Seerr already has users")
         return settings
@@ -1122,7 +1151,7 @@ def ensure_seerr_integrations(env: dict[str, str], running_services: set[str], d
         log("Skipping Seerr automation because the service is not running")
         return
 
-    settings_path = ROOT_DIR / "seerr" / "settings.json"
+    settings_path = get_config_root(env) / "seerr" / "settings.json"
     settings = json.loads(settings_path.read_text())
     settings_changed = False
     env_changed = False
@@ -1245,6 +1274,12 @@ def ensure_qbittorrent_paths_and_categories(env: dict[str, str], running_service
         desired_preferences["temp_path"] = env["QBITTORRENT_TEMP_PATH"]
     if preferences.get("temp_path_enabled") is not True:
         desired_preferences["temp_path_enabled"] = True
+
+    forwarded_port_path = get_config_root(env) / "pia-shared" / "port.dat"
+    if forwarded_port_path.exists():
+        forwarded_port_text = forwarded_port_path.read_text().strip()
+        if forwarded_port_text.isdigit() and preferences.get("listen_port") != int(forwarded_port_text):
+            desired_preferences["listen_port"] = int(forwarded_port_text)
 
     if desired_preferences:
         qbit.request_json(
