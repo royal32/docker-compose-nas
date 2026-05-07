@@ -335,6 +335,7 @@ ensure_root_env() {
   set_if_missing_or_default "$ENV_FILE" "HOSTNAME" "localhost" "$local_hostname"
   set_if_missing_or_default "$ENV_FILE" "BASE_HOSTNAME" "localhost" "$local_hostname"
   set_if_missing_or_default "$ENV_FILE" "CONFIG_ROOT" "." "./runtime"
+  set_if_missing_or_default "$ENV_FILE" "FORCE_HTTPS" "" "true"
 
   data_root=$(get_env_value "$ENV_FILE" "DATA_ROOT" || true)
   if [[ -n "$data_root" ]]; then
