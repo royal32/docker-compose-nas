@@ -62,13 +62,7 @@ repair_seerr_config_permissions() {
   seerr_config_dir="$(get_config_root)/seerr"
   mkdir -p "$seerr_config_dir/logs"
   chmod -R a+rwX "$seerr_config_dir"
-
-  if docker compose run --rm --no-deps --user root --entrypoint sh seerr -lc \
-    'mkdir -p /app/config/logs && chmod -R a+rwX /app/config' >/dev/null 2>&1; then
-    log "Repaired Seerr config volume permissions"
-  else
-    log "Seerr config volume permission repair used host chmod fallback only"
-  fi
+  log "Repaired Seerr config volume permissions"
 }
 
 clean_appledouble_files() {

@@ -268,20 +268,147 @@ def sync_generated_api_keys(env: dict[str, str], dry_run: bool) -> bool:
 
 
 def reapply_homepage_label_services(running_services: set[str], dry_run: bool) -> None:
-    label_services = [
-        service
-        for service in ("homepage", "jellyfin", "seerr", "sonarr", "radarr", "lidarr", "prowlarr", "bazarr")
-        if service in running_services
+    # Do not run `docker compose up` from inside stack-setup. Relative bind
+    # mounts are resolved from the setup container's /stack directory, which can
+    # recreate app containers against the wrong config tree.
+    if running_services:
+        log("Skipped Homepage label reapply; generated API keys were synced without recreating services")
+
+
+def homepage_service_yaml(service: dict[str, Any]) -> str:
+    lines = [
+        f"    - {service['name']}:",
+        f"        icon: {service['icon']}",
+        f"        href: {service['href']}",
+        f"        description: {service['description']}",
     ]
-    if not label_services:
+    widget = service.get("widget")
+    if widget:
+        lines.extend(
+            [
+                "        widget:",
+                f"          type: {widget['type']}",
+                f"          url: {widget['url']}",
+            ]
+        )
+        for key in ("key", "username", "password"):
+            if widget.get(key):
+                lines.append(f"          {key}: {widget[key]}")
+    return "\n".join(lines)
+
+
+def write_homepage_services(env: dict[str, str], running_services: set[str], dry_run: bool) -> None:
+    if "homepage" not in running_services:
         return
+
+    services = [
+        {
+            "service": "sonarr",
+            "group": "Media",
+            "name": "Sonarr",
+            "icon": "sonarr.png",
+            "href": "/sonarr",
+            "description": "Series management",
+            "widget": {
+                "type": "sonarr",
+                "url": "http://sonarr:8989/sonarr",
+                "key": env.get("SONARR_API_KEY", ""),
+            },
+        },
+        {
+            "service": "radarr",
+            "group": "Media",
+            "name": "Radarr",
+            "icon": "radarr.png",
+            "href": "/radarr",
+            "description": "Movies management",
+            "widget": {
+                "type": "radarr",
+                "url": "http://radarr:7878/radarr",
+                "key": env.get("RADARR_API_KEY", ""),
+            },
+        },
+        {
+            "service": "seerr",
+            "group": "Media",
+            "name": "Seerr",
+            "icon": "jellyseerr.png",
+            "href": build_https_url(env.get("SEERR_HOSTNAME", "")) or "/",
+            "description": "Content requests",
+            "widget": {
+                "type": "jellyseerr",
+                "url": "http://seerr:5055",
+                "key": env.get("SEERR_API_KEY", ""),
+            },
+        },
+        {
+            "service": "jellyfin",
+            "group": "Media",
+            "name": "Jellyfin",
+            "icon": "jellyfin.png",
+            "href": "/jellyfin",
+            "description": "Media server",
+            "widget": {
+                "type": "jellyfin",
+                "url": "http://jellyfin:8096/jellyfin",
+                "key": env.get("JELLYFIN_API_KEY", ""),
+            },
+        },
+        {
+            "service": "prowlarr",
+            "group": "Download",
+            "name": "Prowlarr",
+            "icon": "prowlarr.png",
+            "href": "/prowlarr",
+            "description": "Indexer management",
+            "widget": {
+                "type": "prowlarr",
+                "url": "http://prowlarr:9696/prowlarr",
+                "key": env.get("PROWLARR_API_KEY", ""),
+            },
+        },
+        {
+            "service": "qbittorrent",
+            "group": "Download",
+            "name": "qBittorrent",
+            "icon": "qbittorrent.png",
+            "href": "/qbittorrent",
+            "description": "BitTorrent client",
+            "widget": {
+                "type": "qbittorrent",
+                "url": "http://vpn:8080",
+                "username": env.get("QBITTORRENT_USERNAME", ""),
+                "password": env.get("QBITTORRENT_PASSWORD", ""),
+            },
+        },
+    ]
+    services = [service for service in services if service["service"] in running_services]
+    if not services:
+        return
+
+    grouped_services: dict[str, list[dict[str, Any]]] = {}
+    for service in services:
+        grouped_services.setdefault(service["group"], []).append(service)
+
+    homepage_dir = get_config_root(env) / "homepage"
+    services_path = homepage_dir / "services.yaml"
+    docker_path = homepage_dir / "docker.yaml"
+    content_lines = ["---"]
+    for group, group_services in grouped_services.items():
+        content_lines.append(f"- {group}:")
+        content_lines.extend(homepage_service_yaml(service) for service in group_services)
+    content = "\n".join(content_lines) + "\n"
+    docker_content = "---\n# Service discovery is generated in services.yaml after first-run API keys exist.\n"
 
     if dry_run:
-        log(f"[dry-run] Would recreate services with Homepage labels: {', '.join(label_services)}")
+        log(f"[dry-run] Would write Homepage services to {services_path}")
         return
 
-    run_compose(["up", "-d", "--no-deps", *label_services])
-    log("Reapplied services with Homepage labels after .env key sync")
+    homepage_dir.mkdir(parents=True, exist_ok=True)
+    services_path.write_text(content)
+    docker_path.write_text(docker_content)
+    run_compose(["restart", "homepage"], check=False)
+    log("Wrote generated Homepage services and restarted Homepage")
 
 
 def next_settings_id(items: list[dict[str, Any]]) -> int:
@@ -1529,6 +1656,7 @@ def main() -> int:
 
     sync_generated_api_keys(env, args.dry_run)
     reapply_homepage_label_services(running_services, args.dry_run)
+    write_homepage_services(env, running_services, args.dry_run)
 
     log("App connection automation complete")
     return 0

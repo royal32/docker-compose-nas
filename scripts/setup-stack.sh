@@ -182,6 +182,26 @@ copy_if_missing() {
   log "Created ${target_file#$ROOT_DIR/} from template"
 }
 
+prepare_homepage_config() {
+  local config_root
+  local homepage_config
+  local file
+
+  config_root="$(get_config_root)"
+  homepage_config="$config_root/homepage"
+  mkdir -p "$homepage_config"
+
+  if [[ -d "$ROOT_DIR/homepage/tpl" ]]; then
+    cp -f "$ROOT_DIR"/homepage/tpl/*.yaml "$homepage_config"/
+  fi
+
+  for file in custom.css custom.js; do
+    if [[ -f "$ROOT_DIR/homepage/$file" && ! -f "$homepage_config/$file" ]]; then
+      cp "$ROOT_DIR/homepage/$file" "$homepage_config/$file"
+    fi
+  done
+}
+
 generate_secret() {
   if command -v openssl >/dev/null 2>&1; then
     openssl rand -hex 32
@@ -333,6 +353,7 @@ ensure_root_env() {
   normalize_env_value_quotes "$ENV_FILE" "DOWNLOAD_ROOT"
   normalize_env_value_quotes "$ENV_FILE" "IMMICH_UPLOAD_LOCATION"
   normalize_env_value_quotes "$ENV_FILE" "CONFIG_ROOT"
+  prepare_homepage_config
 }
 
 apply_root_overrides() {
