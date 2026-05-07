@@ -5,6 +5,7 @@ from __future__ import annotations
 import argparse
 import copy
 import json
+import os
 import re
 import shlex
 import sqlite3
@@ -442,6 +443,8 @@ class QBittorrentClient(JsonClient):
             shlex.quote(self.cookie_file),
             "-c",
             shlex.quote(self.cookie_file),
+            "-w",
+            shlex.quote("\n__STATUS__:%{http_code}"),
         ]
         if payload is not None:
             curl_parts.extend([
@@ -467,7 +470,14 @@ class QBittorrentClient(JsonClient):
         if result.returncode != 0:
             raise RuntimeError(f"curl request failed for {method} {path}: {result.stderr.strip()}")
 
-        body = result.stdout
+        output = result.stdout
+        body, _, status_line = output.rpartition("\n__STATUS__:")
+        status_code = status_line.strip()
+
+        if not status_code.isdigit() or not 200 <= int(status_code) < 300:
+            response_text = body.strip()
+            error_text = result.stderr.strip() or response_text or f"HTTP {status_code or 'unknown'}"
+            raise RuntimeError(f"{method} {path} failed: {error_text}")
 
         if not expect_json:
             return body
@@ -479,7 +489,10 @@ class QBittorrentClient(JsonClient):
 
     def login(self) -> None:
         last_response = ""
-        for _ in range(20):
+        wait_timeout = int(os.environ.get("QBITTORRENT_API_WAIT_TIMEOUT") or os.environ.get("SETUP_WAIT_TIMEOUT") or "300")
+        deadline = time.monotonic() + wait_timeout
+
+        while time.monotonic() < deadline:
             try:
                 response = self.request_json(
                     "POST",
@@ -488,14 +501,22 @@ class QBittorrentClient(JsonClient):
                     expect_json=False,
                 )
                 last_response = response.strip()
-                if last_response == "Ok.":
+                if last_response in {"", "Ok."}:
                     return
-            except RuntimeError:
-                pass
+                if last_response == "Fails.":
+                    raise RuntimeError(
+                        "qBittorrent login failed: credentials were rejected; check "
+                        "QBITTORRENT_USERNAME/QBITTORRENT_PASSWORD or ADMIN_USERNAME/GLOBAL_PASSWORD"
+                    )
+            except RuntimeError as exc:
+                last_response = str(exc)
 
             time.sleep(2)
 
-        raise RuntimeError(f"qBittorrent login failed: {last_response or 'service did not become ready in time'}")
+        raise RuntimeError(
+            f"qBittorrent login failed after {wait_timeout}s: "
+            f"{last_response or 'service did not become ready in time'}"
+        )
 
 
 class ArrApi:
@@ -1471,8 +1492,8 @@ def main() -> int:
     if not args.skip_seerr:
         ensure_seerr_integrations(env, running_services, args.dry_run)
 
-    if sync_generated_api_keys(env, args.dry_run):
-        reapply_homepage_label_services(running_services, args.dry_run)
+    sync_generated_api_keys(env, args.dry_run)
+    reapply_homepage_label_services(running_services, args.dry_run)
 
     log("App connection automation complete")
     return 0

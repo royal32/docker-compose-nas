@@ -48,6 +48,21 @@ warn() {
   printf '[setup] warning: %s\n' "$1" >&2
 }
 
+print_setup_complete_banner() {
+  cat <<'EOF'
+##############################################################################
+##############################################################################
+##                                                                          ##
+##                           SETUP COMPLETE                                 ##
+##                                                                          ##
+##                 Docker Compose NAS is fully configured.                  ##
+##                                                                          ##
+##                  You can now open the configured services.                ##
+##                                                                          ##
+##############################################################################
+EOF
+}
+
 die() {
   printf '[setup] error: %s\n' "$1" >&2
   exit 1
@@ -255,6 +270,30 @@ ensure_acme_storage() {
   mkdir -p "$ROOT_DIR/letsencrypt"
   touch "$ROOT_DIR/letsencrypt/acme.json"
   chmod 600 "$ROOT_DIR/letsencrypt/acme.json"
+}
+
+ensure_seerr_config_permissions() {
+  local config_root
+  local seerr_config_dir
+
+  config_root=$(get_env_value "$ENV_FILE" "CONFIG_ROOT" || printf '.')
+  if [[ "$config_root" = /* ]]; then
+    seerr_config_dir="$config_root/seerr"
+  else
+    seerr_config_dir="$ROOT_DIR/$config_root/seerr"
+  fi
+
+  mkdir -p "$seerr_config_dir/logs"
+  chmod -R a+rwX "$seerr_config_dir"
+}
+
+repair_seerr_config_permissions_with_image() {
+  if docker compose run --rm --no-deps --user root --entrypoint sh seerr -lc \
+    'mkdir -p /app/config/logs && chmod -R a+rwX /app/config' >/dev/null 2>&1; then
+    log "Repaired Seerr config volume permissions"
+  else
+    warn "Seerr config volume permission repair used host chmod fallback only"
+  fi
 }
 
 ensure_local_tls_certificate() {
@@ -522,6 +561,7 @@ ensure_commands
 ensure_root_env
 apply_root_overrides
 ensure_acme_storage
+ensure_seerr_config_permissions
 ensure_local_tls_certificate
 
 ACTIVE_PROFILES=$(get_env_value "$ENV_FILE" "COMPOSE_PROFILES" || true)
@@ -532,11 +572,16 @@ validate_compose
 if (( SKIP_UP == 0 )); then
   log "Starting compose stack"
   (cd "$ROOT_DIR" && docker compose up -d --scale stack-setup=0)
+  repair_seerr_config_permissions_with_image
 fi
 
 if (( SKIP_BOOTSTRAP == 0 )); then
   log "Running first-run post-start configuration"
   (cd "$ROOT_DIR" && ./scripts/update-config.sh)
+fi
+
+if (( SKIP_WAIT == 0 )); then
+  wait_for_stack
 fi
 
 if (( SKIP_CONNECTIONS == 0 )); then
@@ -548,4 +593,5 @@ if (( SKIP_WAIT == 0 )); then
   wait_for_stack
 fi
 
+print_setup_complete_banner
 print_remaining_manual_steps "$ACTIVE_PROFILES"

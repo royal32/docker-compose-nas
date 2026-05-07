@@ -15,6 +15,62 @@ die() {
   exit 1
 }
 
+print_setup_complete_banner() {
+  cat <<'EOF'
+##############################################################################
+##############################################################################
+##                                                                          ##
+##                           SETUP COMPLETE                                 ##
+##                                                                          ##
+##                 Docker Compose NAS is fully configured.                  ##
+##                                                                          ##
+##                  You can now open the configured services.                ##
+##                                                                          ##
+##############################################################################
+EOF
+}
+
+strip_wrapping_quotes() {
+  local value="$1"
+  if [[ "$value" == \"*\" && "$value" == *\" ]]; then
+    value="${value:1:${#value}-2}"
+  fi
+  printf '%s' "$value"
+}
+
+get_config_root() {
+  local config_root="."
+  local line
+
+  if [[ -f "$ROOT_DIR/.env" ]]; then
+    line=$(grep -E '^CONFIG_ROOT=' "$ROOT_DIR/.env" | tail -n 1 || true)
+    if [[ -n "$line" ]]; then
+      config_root=$(strip_wrapping_quotes "${line#*=}")
+    fi
+  fi
+
+  if [[ "$config_root" = /* ]]; then
+    printf '%s' "$config_root"
+  else
+    printf '%s/%s' "$ROOT_DIR" "$config_root"
+  fi
+}
+
+repair_seerr_config_permissions() {
+  local seerr_config_dir
+
+  seerr_config_dir="$(get_config_root)/seerr"
+  mkdir -p "$seerr_config_dir/logs"
+  chmod -R a+rwX "$seerr_config_dir"
+
+  if docker compose run --rm --no-deps --user root --entrypoint sh seerr -lc \
+    'mkdir -p /app/config/logs && chmod -R a+rwX /app/config' >/dev/null 2>&1; then
+    log "Repaired Seerr config volume permissions"
+  else
+    log "Seerr config volume permission repair used host chmod fallback only"
+  fi
+}
+
 wait_for_stack() {
   local deadline
   local container_id
@@ -61,12 +117,16 @@ wait_for_stack() {
 }
 
 cd "$ROOT_DIR"
+repair_seerr_config_permissions
 wait_for_stack
 
 log "Running first-run post-start configuration"
 ./scripts/update-config.sh
+wait_for_stack
 
 log "Automating app-to-app connections"
 python3 ./scripts/configure-app-connections.py
+wait_for_stack
 
 log "Setup complete"
+print_setup_complete_banner
