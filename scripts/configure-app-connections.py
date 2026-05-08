@@ -333,7 +333,7 @@ def write_homepage_services(env: dict[str, str], running_services: set[str], dry
             "group": "Media",
             "name": "Seerr",
             "icon": "jellyseerr.png",
-            "href": build_https_url(env.get("SEERR_HOSTNAME", "")) or "/",
+            "href": build_external_url(env, "", env.get("SEERR_HOSTNAME", "")) or "/",
             "description": "Content requests",
             "widget": {
                 "type": "jellyseerr",
@@ -415,10 +415,12 @@ def next_settings_id(items: list[dict[str, Any]]) -> int:
     return max((int(item.get("id", -1)) for item in items), default=-1) + 1
 
 
-def build_https_url(host: str, path: str = "") -> str:
+def build_external_url(env: dict[str, str], path: str = "", host: str = "") -> str:
+    scheme = env.get("PUBLIC_SCHEME") or "https"
+    host = host or env.get("PUBLIC_HOSTNAME") or env.get("HOSTNAME", "")
     if not host or "${" in host:
         return ""
-    return f"https://{host}{path}"
+    return f"{scheme}://{host}{path}"
 
 
 def run_compose(args: list[str], check: bool = True) -> subprocess.CompletedProcess[str]:
@@ -981,7 +983,7 @@ def build_seerr_radarr_settings(arr_api: ArrApi, env: dict[str, str]) -> dict[st
         "tags": [],
         "is4k": False,
         "isDefault": True,
-        "externalUrl": build_https_url(env.get("HOSTNAME", ""), arr_api.service.url_base),
+        "externalUrl": build_external_url(env, arr_api.service.url_base),
         "syncEnabled": env_bool(env, "SEERR_SYNC_ENABLED", True),
         "preventSearch": not env_bool(env, "SEERR_AUTO_SEARCH", True),
         "tagRequests": False,
@@ -1009,7 +1011,7 @@ def build_seerr_sonarr_settings(arr_api: ArrApi, env: dict[str, str]) -> dict[st
         "tags": [],
         "is4k": False,
         "isDefault": True,
-        "externalUrl": build_https_url(env.get("HOSTNAME", ""), arr_api.service.url_base),
+        "externalUrl": build_external_url(env, arr_api.service.url_base),
         "syncEnabled": env_bool(env, "SEERR_SYNC_ENABLED", True),
         "preventSearch": not env_bool(env, "SEERR_AUTO_SEARCH", True),
         "tagRequests": False,
@@ -1298,14 +1300,14 @@ def ensure_seerr_integrations(env: dict[str, str], running_services: set[str], d
         if env_changed:
             env["JELLYFIN_API_KEY"] = jellyfin_api_key
 
-    seerr_application_url = build_https_url(env.get("SEERR_HOSTNAME", ""))
+    seerr_application_url = build_external_url(env, "", env.get("SEERR_HOSTNAME", ""))
     if seerr_application_url and settings.get("main", {}).get("applicationUrl") != seerr_application_url:
         settings.setdefault("main", {})["applicationUrl"] = seerr_application_url
         settings_changed = True
 
     if "jellyfin" in running_services:
         jellyfin_public_info = JellyfinApi().get_public_info()
-        jellyfin_external_url = env.get("SEERR_JELLYFIN_EXTERNAL_URL", "") or build_https_url(env.get("HOSTNAME", ""), "/jellyfin")
+        jellyfin_external_url = env.get("SEERR_JELLYFIN_EXTERNAL_URL", "") or build_external_url(env, "/jellyfin")
         jellyfin_settings = settings.setdefault("jellyfin", {})
         desired_jellyfin = {
             "name": jellyfin_public_info.get("ServerName", jellyfin_settings.get("name", "")),

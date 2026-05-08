@@ -60,8 +60,8 @@ services:
     restart: unless-stopped
     network_mode: host
     environment:
-      - LOCAL_MDNS_HOSTNAME=${HOSTNAME}
-      - LOCAL_MDNS_HOSTS=${HOSTNAME},${SEERR_HOSTNAME},${IMMICH_HOSTNAME:-},${HOMEASSISTANT_HOSTNAME:-},${ADGUARD_HOSTNAME:-}
+      - LOCAL_MDNS_HOSTNAME=
+      - LOCAL_MDNS_HOSTS=${MDNS_ALIASES:-}
       - MDNS_ADVERTISE_IP=${MDNS_ADVERTISE_IP:-}
     volumes:
       - .:/stack:ro
@@ -83,9 +83,6 @@ services:
       - --providers.docker.exposedbydefault=false
       - --entrypoints.web.address=:80
       - --entrypoints.web-secure.address=:443
-      - --entrypoints.web.http.redirections.entryPoint.to=web-secure
-      - --entrypoints.web.http.redirections.entryPoint.scheme=https
-      - --entrypoints.web.http.redirections.entrypoint.permanent=true
       - --certificatesresolvers.myresolver.acme.dnschallenge=${DNS_CHALLENGE:-true}
       - --certificatesresolvers.myresolver.acme.dnschallenge.provider=${DNS_CHALLENGE_PROVIDER:-cloudflare}
       - --certificatesresolvers.myresolver.acme.dnschallenge.resolvers=1.1.1.1:53,8.8.8.8:53
@@ -131,8 +128,12 @@ services:
     labels:
       - traefik.enable=true
       - traefik.http.routers.sonarr.rule=PathPrefix(`/sonarr`)
+      - traefik.http.routers.sonarr.entrypoints=web-secure
       - traefik.http.routers.sonarr.tls=true
       - traefik.http.routers.sonarr.tls.certresolver=${TRAEFIK_CERT_RESOLVER:-}
+      - traefik.http.routers.sonarr-http.rule=PathPrefix(`/sonarr`)
+      - traefik.http.routers.sonarr-http.entrypoints=web
+      - traefik.http.routers.sonarr-http.service=sonarr
       - traefik.http.services.sonarr.loadbalancer.server.port=8989
       - homepage.group=Media
       - homepage.name=Sonarr
@@ -162,8 +163,12 @@ services:
     labels:
       - traefik.enable=true
       - traefik.http.routers.radarr.rule=PathPrefix(`/radarr`)
+      - traefik.http.routers.radarr.entrypoints=web-secure
       - traefik.http.routers.radarr.tls=true
       - traefik.http.routers.radarr.tls.certresolver=${TRAEFIK_CERT_RESOLVER:-}
+      - traefik.http.routers.radarr-http.rule=PathPrefix(`/radarr`)
+      - traefik.http.routers.radarr-http.entrypoints=web
+      - traefik.http.routers.radarr-http.service=radarr
       - traefik.http.services.radarr.loadbalancer.server.port=7878
       - homepage.group=Media
       - homepage.name=Radarr
@@ -259,13 +264,17 @@ services:
     labels:
       - traefik.enable=true
       - traefik.http.routers.seerr.rule=(Host(`${SEERR_HOSTNAME}`))
+      - traefik.http.routers.seerr.entrypoints=web-secure
       - traefik.http.routers.seerr.tls=true
       - traefik.http.routers.seerr.tls.certresolver=${TRAEFIK_CERT_RESOLVER:-}
+      - traefik.http.routers.seerr-http.rule=(Host(`${SEERR_HOSTNAME}`))
+      - traefik.http.routers.seerr-http.entrypoints=web
+      - traefik.http.routers.seerr-http.service=seerr
       - traefik.http.services.seerr.loadbalancer.server.port=5055
       - homepage.group=Media
       - homepage.name=Seerr
       - homepage.icon=jellyseerr.png
-      - homepage.href=https://${SEERR_HOSTNAME}
+      - homepage.href=${PUBLIC_SCHEME:-https}://${SEERR_HOSTNAME}
       - homepage.description=Content Recommendations and Request Management
       - homepage.weight=3
       - homepage.widget.type=jellyseerr
@@ -289,8 +298,12 @@ services:
     labels:
       - traefik.enable=true
       - traefik.http.routers.prowlarr.rule=PathPrefix(`/prowlarr`)
+      - traefik.http.routers.prowlarr.entrypoints=web-secure
       - traefik.http.routers.prowlarr.tls=true
       - traefik.http.routers.prowlarr.tls.certresolver=${TRAEFIK_CERT_RESOLVER:-}
+      - traefik.http.routers.prowlarr-http.rule=PathPrefix(`/prowlarr`)
+      - traefik.http.routers.prowlarr-http.entrypoints=web
+      - traefik.http.routers.prowlarr-http.service=prowlarr
       - traefik.http.services.prowlarr.loadbalancer.server.port=9696
       - homepage.group=Download
       - homepage.name=Prowlarr
@@ -399,20 +412,6 @@ services:
       vpn:
         condition: service_healthy
     labels:
-      - traefik.enable=true
-      - traefik.http.routers.qbittorrent.rule=PathPrefix(`/qbittorrent`)
-      - traefik.http.routers.qbittorrent.tls=true
-      - traefik.http.routers.qbittorrent.tls.certresolver=${TRAEFIK_CERT_RESOLVER:-}
-      - traefik.http.services.qbittorrent.loadbalancer.server.port=8080
-      - traefik.http.routers.qbittorrent.middlewares=qbittorrent-strip-slash,qbittorrent-stripprefix,qbittorrent-drop-encoding
-      # https://github.com/qbittorrent/qBittorrent/issues/5693#issuecomment-552146296
-      - traefik.http.middlewares.qbittorrent-stripprefix.stripPrefix.prefixes=/qbittorrent
-      # https://community.traefik.io/t/middleware-to-add-the-if-needed/1895/19
-      - traefik.http.middlewares.qbittorrent-strip-slash.redirectregex.regex=(^.*\/qbittorrent$$)
-      - traefik.http.middlewares.qbittorrent-strip-slash.redirectregex.replacement=$$1/
-      - traefik.http.middlewares.qbittorrent-strip-slash.redirectregex.permanent=false
-      # https://github.com/VueTorrent/VueTorrent/issues/2718#issuecomment-4189837679
-      - traefik.http.middlewares.qbittorrent-drop-encoding.headers.customrequestheaders.Accept-Encoding=
       - com.centurylinklabs.watchtower.depends-on=vpn
       - homepage.group=Download
       - homepage.name=qBittorrent
@@ -451,6 +450,26 @@ services:
       - net.ipv6.conf.all.disable_ipv6=1
       - net.ipv6.conf.lo.disable_ipv6=1
     restart: always
+    labels:
+      - traefik.enable=true
+      - traefik.http.routers.qbittorrent.rule=PathPrefix(`/qbittorrent`)
+      - traefik.http.routers.qbittorrent.entrypoints=web-secure
+      - traefik.http.routers.qbittorrent.tls=true
+      - traefik.http.routers.qbittorrent.tls.certresolver=${TRAEFIK_CERT_RESOLVER:-}
+      - traefik.http.routers.qbittorrent-http.rule=PathPrefix(`/qbittorrent`)
+      - traefik.http.routers.qbittorrent-http.entrypoints=web
+      - traefik.http.routers.qbittorrent-http.service=qbittorrent
+      - traefik.http.routers.qbittorrent-http.middlewares=qbittorrent-strip-slash,qbittorrent-stripprefix,qbittorrent-drop-encoding
+      - traefik.http.services.qbittorrent.loadbalancer.server.port=8080
+      - traefik.http.routers.qbittorrent.middlewares=qbittorrent-strip-slash,qbittorrent-stripprefix,qbittorrent-drop-encoding
+      # https://github.com/qbittorrent/qBittorrent/issues/5693#issuecomment-552146296
+      - traefik.http.middlewares.qbittorrent-stripprefix.stripPrefix.prefixes=/qbittorrent
+      # https://community.traefik.io/t/middleware-to-add-the-if-needed/1895/19
+      - traefik.http.middlewares.qbittorrent-strip-slash.redirectregex.regex=(^.*\/qbittorrent$$)
+      - traefik.http.middlewares.qbittorrent-strip-slash.redirectregex.replacement=$$1/
+      - traefik.http.middlewares.qbittorrent-strip-slash.redirectregex.permanent=false
+      # https://github.com/VueTorrent/VueTorrent/issues/2718#issuecomment-4189837679
+      - traefik.http.middlewares.qbittorrent-drop-encoding.headers.customrequestheaders.Accept-Encoding=
   cross-seed:
     image: ghcr.io/cross-seed/cross-seed:latest
     container_name: cross-seed
@@ -553,7 +572,7 @@ services:
       - PUID=${USER_ID}
       - PGID=${GROUP_ID}
       - TZ=${TIMEZONE}
-      - JELLYFIN_PublishedServerUrl=${HOSTNAME}/jellyfin
+      - JELLYFIN_PublishedServerUrl=${PUBLIC_SCHEME:-https}://${PUBLIC_HOSTNAME}/jellyfin
     volumes:
       - ${CONFIG_ROOT:-.}/jellyfin:/config
       - ${DATA_ROOT}:/data
@@ -570,8 +589,12 @@ services:
     labels:
       - traefik.enable=true
       - traefik.http.routers.jellyfin.rule=PathPrefix(`/jellyfin`)
+      - traefik.http.routers.jellyfin.entrypoints=web-secure
       - traefik.http.routers.jellyfin.tls=true
       - traefik.http.routers.jellyfin.tls.certresolver=${TRAEFIK_CERT_RESOLVER:-}
+      - traefik.http.routers.jellyfin-http.rule=PathPrefix(`/jellyfin`)
+      - traefik.http.routers.jellyfin-http.entrypoints=web
+      - traefik.http.routers.jellyfin-http.service=jellyfin
       - traefik.http.services.jellyfin.loadbalancer.server.port=8096
       - homepage.group=Media
       - homepage.name=Jellyfin
@@ -642,8 +665,27 @@ services:
     labels:
       - traefik.enable=true
       - traefik.http.routers.homepage.rule=PathPrefix(`/`)
+      - traefik.http.routers.homepage.entrypoints=web-secure
       - traefik.http.routers.homepage.tls=true
       - traefik.http.routers.homepage.tls.certresolver=${TRAEFIK_CERT_RESOLVER:-}
+      - traefik.http.routers.homepage-alias.rule=Path(`/homepage`) || Path(`/homepage/`)
+      - traefik.http.routers.homepage-alias.entrypoints=web-secure
+      - traefik.http.routers.homepage-alias.tls=true
+      - traefik.http.routers.homepage-alias.tls.certresolver=${TRAEFIK_CERT_RESOLVER:-}
+      - traefik.http.routers.homepage-alias.priority=1000
+      - traefik.http.routers.homepage-alias.middlewares=homepage-alias-redirect
+      - traefik.http.routers.homepage-alias.service=homepage
+      - traefik.http.routers.homepage-http.rule=PathPrefix(`/`)
+      - traefik.http.routers.homepage-http.entrypoints=web
+      - traefik.http.routers.homepage-http.service=homepage
+      - traefik.http.routers.homepage-alias-http.rule=Path(`/homepage`) || Path(`/homepage/`)
+      - traefik.http.routers.homepage-alias-http.entrypoints=web
+      - traefik.http.routers.homepage-alias-http.priority=1000
+      - traefik.http.routers.homepage-alias-http.middlewares=homepage-alias-redirect
+      - traefik.http.routers.homepage-alias-http.service=homepage
+      - traefik.http.middlewares.homepage-alias-redirect.redirectregex.regex=^(.+)/homepage/?$$
+      - traefik.http.middlewares.homepage-alias-redirect.redirectregex.replacement=$$1/
+      - traefik.http.middlewares.homepage-alias-redirect.redirectregex.permanent=false
       - traefik.http.services.homepage.loadbalancer.server.port=3000
   watchtower:
     image: ghcr.io/nicholas-fedor/watchtower:latest

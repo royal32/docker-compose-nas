@@ -49,12 +49,6 @@ detect_names() {
   local names="${LOCAL_MDNS_HOSTS:-}"
   local name
   local normalized
-  local discovered
-
-  if [[ -z "$names" ]]; then
-    discovered=$(detect_name || true)
-    [[ -n "$discovered" ]] && names="$discovered"
-  fi
 
   IFS=',' read -r -a name_list <<< "$names"
   for name in "${name_list[@]}"; do
@@ -72,30 +66,19 @@ detect_ip() {
     return 0
   fi
 
-  ip=$(ip route get 1.1.1.1 2>/dev/null | awk '
-    {
-      for (i = 1; i <= NF; i++) {
-        if ($i == "src") {
-          print $(i + 1)
-          exit
-        }
-      }
-    }
-  ')
-
-  if [[ -z "$ip" ]]; then
-    ip=$(hostname -i 2>/dev/null | awk '{ print $1 }')
-  fi
-
-  [[ -n "$ip" ]] || return 1
-  printf '%s' "$ip"
+  return 1
 }
 
 mapfile -t names < <(detect_names)
-ip=$(detect_ip)
 
 if (( ${#names[@]} == 0 )); then
   log "No .local hostnames to advertise"
+  sleep infinity
+fi
+
+ip=$(detect_ip || true)
+if [[ -z "$ip" ]]; then
+  log "MDNS_ADVERTISE_IP is required before advertising aliases from a container"
   sleep infinity
 fi
 

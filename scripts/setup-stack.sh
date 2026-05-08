@@ -93,6 +93,22 @@ get_env_value() {
   strip_wrapping_quotes "$line"
 }
 
+resolve_env_references() {
+  local value="$1"
+  local key
+  local replacement
+  local depth=0
+
+  while [[ "$value" =~ \$\{([A-Za-z_][A-Za-z0-9_]*)\} && $depth -lt 10 ]]; do
+    key="${BASH_REMATCH[1]}"
+    replacement=$(get_env_value "$ENV_FILE" "$key" || true)
+    value="${value//\$\{${key}\}/$replacement}"
+    depth=$((depth + 1))
+  done
+
+  printf '%s' "$value"
+}
+
 set_env_value() {
   local file="$1"
   local key="$2"
@@ -333,9 +349,11 @@ ensure_root_env() {
   set_if_missing_or_default "$ENV_FILE" "GROUP_ID" "1000" "$group_id"
   set_if_missing_or_default "$ENV_FILE" "TIMEZONE" "America/New_York" "$(detect_timezone)"
   set_if_missing_or_default "$ENV_FILE" "HOSTNAME" "localhost" "$local_hostname"
-  set_if_missing_or_default "$ENV_FILE" "BASE_HOSTNAME" "localhost" "$local_hostname"
+  set_if_missing_or_default "$ENV_FILE" "PUBLIC_HOSTNAME" "localhost" "$local_hostname"
+  set_if_missing_or_default "$ENV_FILE" "PUBLIC_SCHEME" "" "http"
+  set_if_missing_or_default "$ENV_FILE" "BASE_HOSTNAME" "localhost" "\${PUBLIC_HOSTNAME}"
   set_if_missing_or_default "$ENV_FILE" "CONFIG_ROOT" "." "./runtime"
-  set_if_missing_or_default "$ENV_FILE" "FORCE_HTTPS" "" "true"
+  set_if_missing_or_default "$ENV_FILE" "FORCE_HTTPS" "" "false"
 
   data_root=$(get_env_value "$ENV_FILE" "DATA_ROOT" || true)
   if [[ -n "$data_root" ]]; then
@@ -423,6 +441,10 @@ ensure_local_tls_certificate() {
   local dynamic_file
   local host_name
   local extra_hosts
+  local seerr_host
+  local mdns_aliases
+  local force_https
+  local cert_needs_regen
   local san_entries
   local index
   local host
@@ -435,8 +457,11 @@ ensure_local_tls_certificate() {
   key_file="$cert_dir/local.key"
   config_file="$cert_dir/local-openssl.cnf"
   dynamic_file="$dynamic_dir/local-tls.yml"
-  host_name=$(get_env_value "$ENV_FILE" "HOSTNAME" || true)
-  extra_hosts=$(get_env_value "$ENV_FILE" "LOCAL_TLS_HOSTS" || true)
+  host_name=$(resolve_env_references "$(get_env_value "$ENV_FILE" "PUBLIC_HOSTNAME" || true)")
+  extra_hosts=$(resolve_env_references "$(get_env_value "$ENV_FILE" "LOCAL_TLS_HOSTS" || true)")
+  seerr_host=$(resolve_env_references "$(get_env_value "$ENV_FILE" "SEERR_HOSTNAME" || true)")
+  mdns_aliases=$(resolve_env_references "$(get_env_value "$ENV_FILE" "MDNS_ALIASES" || true)")
+  force_https=$(get_env_value "$ENV_FILE" "FORCE_HTTPS" || printf 'true')
 
   mkdir -p "$cert_dir" "$dynamic_dir"
 
@@ -448,11 +473,17 @@ ensure_local_tls_certificate() {
     index=$((index + 1))
   fi
 
-  if [[ -n "$extra_hosts" ]]; then
-    IFS=',' read -r -a extra_hosts_array <<< "$extra_hosts"
+  if [[ -n "$seerr_host" && "$seerr_host" != "localhost" && "$seerr_host" != *'${'* ]]; then
+    san_entries+=("DNS.${index} = ${seerr_host}")
+    index=$((index + 1))
+  fi
+
+  if [[ -n "$extra_hosts" || -n "$mdns_aliases" ]]; then
+    IFS=',' read -r -a extra_hosts_array <<< "${extra_hosts},${mdns_aliases}"
     for host in "${extra_hosts_array[@]}"; do
       host=$(printf '%s' "$host" | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')
       [[ -n "$host" ]] || continue
+      [[ "$host" == *'${'* ]] && continue
       san_entries+=("DNS.${index} = ${host}")
       index=$((index + 1))
     done
@@ -473,7 +504,16 @@ ensure_local_tls_certificate() {
     printf '%s\n' "${san_entries[@]}"
   } > "$config_file"
 
+  cert_needs_regen=0
   if [[ ! -f "$cert_file" || ! -f "$key_file" ]] || ! openssl x509 -checkend 2592000 -noout -in "$cert_file" >/dev/null 2>&1; then
+    cert_needs_regen=1
+  elif [[ -n "$host_name" && "$host_name" != "localhost" ]] && ! openssl x509 -in "$cert_file" -noout -ext subjectAltName 2>/dev/null | grep -F "DNS:${host_name}" >/dev/null; then
+    cert_needs_regen=1
+  elif [[ -n "$seerr_host" && "$seerr_host" != "localhost" && "$seerr_host" != *'${'* ]] && ! openssl x509 -in "$cert_file" -noout -ext subjectAltName 2>/dev/null | grep -F "DNS:${seerr_host}" >/dev/null; then
+    cert_needs_regen=1
+  fi
+
+  if (( cert_needs_regen == 1 )); then
     openssl req -x509 -nodes -days 825 -newkey rsa:2048 \
       -keyout "$key_file" \
       -out "$cert_file" \
@@ -490,6 +530,26 @@ tls:
         certFile: /traefik-certs/local.crt
         keyFile: /traefik-certs/local.key
 EOF
+
+  if [[ "$force_https" =~ ^(1|true|yes|on)$ ]]; then
+    cat >> "$dynamic_file" <<'EOF'
+http:
+  routers:
+    http-to-https:
+      entryPoints:
+        - web
+      rule: PathPrefix(`/`)
+      priority: 2147483646
+      middlewares:
+        - redirect-to-https
+      service: noop@internal
+  middlewares:
+    redirect-to-https:
+      redirectScheme:
+        scheme: https
+        permanent: false
+EOF
+  fi
 }
 
 provision_service_envs() {
@@ -605,10 +665,10 @@ print_remaining_manual_steps() {
   pia_user=$(get_env_value "$ENV_FILE" "PIA_USER" || true)
   pia_pass=$(get_env_value "$ENV_FILE" "PIA_PASS" || true)
   traefik_resolver=$(get_env_value "$ENV_FILE" "TRAEFIK_CERT_RESOLVER" || true)
-  host_name=$(get_env_value "$ENV_FILE" "HOSTNAME" || true)
-  immich_hostname=$(get_env_value "$ENV_FILE" "IMMICH_HOSTNAME" || true)
-  homeassistant_hostname=$(get_env_value "$ENV_FILE" "HOMEASSISTANT_HOSTNAME" || true)
-  adguard_hostname=$(get_env_value "$ENV_FILE" "ADGUARD_HOSTNAME" || true)
+  host_name=$(resolve_env_references "$(get_env_value "$ENV_FILE" "PUBLIC_HOSTNAME" || true)")
+  immich_hostname=$(resolve_env_references "$(get_env_value "$ENV_FILE" "IMMICH_HOSTNAME" || true)")
+  homeassistant_hostname=$(resolve_env_references "$(get_env_value "$ENV_FILE" "HOMEASSISTANT_HOSTNAME" || true)")
+  adguard_hostname=$(resolve_env_references "$(get_env_value "$ENV_FILE" "ADGUARD_HOSTNAME" || true)")
 
   printf '\n'
   log "Remaining manual setup"
@@ -634,7 +694,7 @@ print_remaining_manual_steps() {
   fi
 
   if [[ "$host_name" == "localhost" ]]; then
-    printf "  - Local access is available at https://localhost/ with Traefik's default certificate.\n"
+    printf "  - Set PUBLIC_HOSTNAME in .env to the LAN hostname clients should use, for example velvet.local.\n"
   fi
 }
 
